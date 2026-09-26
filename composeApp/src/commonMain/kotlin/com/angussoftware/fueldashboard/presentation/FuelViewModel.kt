@@ -1545,9 +1545,23 @@ class FuelViewModel(
         // ── Standalone alert generation ──────────────────────────────────
         // If no connected API (orchestrator) is providing alerts, generate
         // them locally from provider fuel percentages.
+        // Read once, here, because two things downstream need it and one of
+        // them is above the state update that used to produce it. Reading
+        // _state.value gave the PREVIOUS cycle's route — null on the first
+        // poll after launch, which made every provider count as "in use" and
+        // raised a CRITICAL for providers nothing was routed to.
+        val currentRoute = routeReader()?.let { route ->
+            route.copy(
+                matchedProviderId = ClaudeCodeRoute.matchProvider(
+                    route.baseUrl,
+                    _state.value.settings.providers,
+                ),
+            )
+        }
+
         val generatedAlerts = generateFuelAlerts(
             reports = reports,
-            servingProviderId = _state.value.claudeCodeRoute?.matchedProviderId,
+            servingProviderId = currentRoute?.matchedProviderId,
         )
         // Merge: if the orchestrator provided alerts, use those + generated.
         // Otherwise, use generated alone.
@@ -1773,14 +1787,7 @@ class FuelViewModel(
             // (not the top-level function) so injected test readers are
             // honoured and tests never touch a real ~/.claude.
             claudeCodeFleet = fleetReader(),
-            claudeCodeRoute = routeReader()?.let { route ->
-                route.copy(
-                    matchedProviderId = ClaudeCodeRoute.matchProvider(
-                        route.baseUrl,
-                        current.settings.providers,
-                    ),
-                )
-            },
+            claudeCodeRoute = currentRoute,
             burnRate = if (burnRate != null && burnRate > 0) burnRate else null,
             dataPointCount = dataPoints,
             fuelProjection = fuelProjection,
