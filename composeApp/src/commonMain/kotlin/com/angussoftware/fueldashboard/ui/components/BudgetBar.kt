@@ -36,12 +36,12 @@ import com.angussoftware.fueldashboard.util.formatRoot
  * Budget bar for SPEND_BUDGET providers (OpenAI, Anthropic).
  *
  * Shows dollar spend against an optional monthly limit. Visually distinct from
- * [FuelBar] — uses amber/orange tones instead of green-to-red, and shows dollar
- * amounts rather than percentages.
+ * [FuelBar] by anchor choice — tertiary → error instead of primary → error —
+ * and shows dollar amounts rather than percentages.
  *
  * - When [limitDollars] is provided: `$X.XX used of $Y.YY` with fill bar.
  * - When [limitDollars] is null: `$X.XX used this month` (no fill bar).
- * - Bar turns red at >80% of budget.
+ * - Color ramps tertiary → error as spend approaches the limit.
  */
 @Composable
 fun BudgetBar(
@@ -84,7 +84,7 @@ fun BudgetBar(
                 },
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 fontWeight = FontWeight.Medium,
-                color = budgetTextColor(usedDollars, limitDollars),
+                color = budgetTextColor(usedDollars, limitDollars, MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.error),
             )
         }
         Spacer(Modifier.height(4.dp))
@@ -98,7 +98,7 @@ fun BudgetBar(
                 label = "budgetWidth",
             )
             val animatedColor by animateColorAsState(
-                targetValue = budgetBarColor(usedDollars, limitDollars),
+                targetValue = budgetBarColor(usedDollars, limitDollars, MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.error),
                 animationSpec = tween(400),
                 label = "budgetColor",
             )
@@ -189,7 +189,10 @@ private fun RateLimitMetric(
     modifier: Modifier = Modifier,
 ) {
     val pct = if (limit > 0) (remaining.toFloat() / limit * 100).roundToInt() else 100
-    val color = rateLimitColor(pct)
+    // A rate limit IS a fuel gauge — a resource draining to empty — so it
+    // inherits the fuel ramp (primary → error) rather than inventing a
+    // third palette.
+    val color = fuelGaugeColor(pct, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.error)
     val animatedColor by animateColorAsState(
         targetValue = color,
         animationSpec = tween(400),
@@ -239,43 +242,19 @@ private fun RateLimitMetric(
 }
 
 // -----------------------------------------------------------------------
-// Color helpers — visually distinct from FuelBar
+// Color helpers — theme-derived, see [GaugeColors]
 // -----------------------------------------------------------------------
 
 /**
- * Budget bar colors: teal→amber→red (distinct from FuelBar's green→red).
+ * Budget bar color: tertiary (under budget) → error (over), shorter hue arc.
+ * Theme-derived — see [budgetGaugeColor].
  */
-private fun budgetBarColor(used: Double, limit: Double): Color {
-    val pct = (used / limit * 100).coerceIn(0.0, 100.0)
-    return when {
-        pct > 90 -> Color(0xFFEF5350) // red
-        pct > 80 -> Color(0xFFFF7043) // deep orange
-        pct > 50 -> Color(0xFFFFB74D) // amber
-        else -> Color(0xFF26A69A)     // teal
-    }
-}
+private fun budgetBarColor(used: Double, limit: Double, under: Color, over: Color): Color =
+    budgetGaugeColor((used / limit).coerceIn(0.0, 1.0).toFloat(), under, over)
 
-private fun budgetTextColor(used: Double, limit: Double?): Color {
-    if (limit == null || limit <= 0) return Color(0xFF26A69A) // teal for "no limit"
-    val pct = (used / limit * 100).coerceIn(0.0, 100.0)
-    return when {
-        pct > 90 -> Color(0xFFEF5350)
-        pct > 80 -> Color(0xFFFF7043)
-        pct > 50 -> Color(0xFFFFB74D)
-        else -> Color(0xFF26A69A)
-    }
-}
-
-/**
- * Rate limit colors: blue→teal→orange (distinct from both FuelBar and BudgetBar).
- */
-private fun rateLimitColor(pct: Int): Color {
-    return when {
-        pct > 50 -> Color(0xFF42A5F5) // blue
-        pct > 20 -> Color(0xFF26A69A) // teal
-        pct > 10 -> Color(0xFFFFB74D) // amber
-        else -> Color(0xFFEF5350)     // red
-    }
+private fun budgetTextColor(used: Double, limit: Double?, under: Color, over: Color): Color {
+    if (limit == null || limit <= 0) return under
+    return budgetBarColor(used, limit, under, over)
 }
 
 /**

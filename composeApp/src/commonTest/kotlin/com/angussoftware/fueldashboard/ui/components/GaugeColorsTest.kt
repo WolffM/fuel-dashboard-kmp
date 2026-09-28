@@ -167,4 +167,24 @@ class GaugeColorsTest {
             assertTrue(c.red in 0f..1f && c.green in 0f..1f && c.blue in 0f..1f, "out of sRGB at $pct%")
         }
     }
+
+    // ── budget ramp ──────────────────────────────────────────────────────
+
+    @Test
+    fun budgetRampHitsItsAnchors() {
+        val under = Color(0xFFA0CAFD) // brand tertiary (blue)
+        val over = Color(0xFFFDB0D4)  // brand error (rose)
+        val at0 = budgetGaugeColor(0f, under, over)
+        val at1 = budgetGaugeColor(1f, under, over)
+        assertTrue(abs(at0.blue - under.blue) < 0.02f, "0% spend should be tertiary, was $at0")
+        assertTrue(abs(at1.red - over.red) < 0.02f, "100% spend should be error, was $at1")
+    }
+
+    @Test
+    fun budgetRampClampsOutOfRangeSpend() {
+        val under = Color(0xFFA0CAFD)
+        val over = Color(0xFFFDB0D4)
+        assertEquals(budgetGaugeColor(0f, under, over), budgetGaugeColor(-1f, under, over), "negative spend clamps to under")
+        assertEquals(budgetGaugeColor(1f, under, over), budgetGaugeColor(2.5f, under, over), "overspend clamps to over")
+    }
 }

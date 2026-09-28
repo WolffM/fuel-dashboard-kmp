@@ -183,3 +183,16 @@ fun fuelColor(pct: Int): Color =
 @Composable
 fun timerColor(elapsedFraction: Float): Color =
     timerGaugeColor(elapsedFraction, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary)
+
+/**
+ * Budget ramp, pure and testable: [under] (theme tertiary) → [over]
+ * (theme error) as spend grows 0 → 1 of the limit. Shorter hue arc —
+ * budget's middle states are drift, not alarm, so the ramp walks the
+ * theme's own span from its second accent to its error. Distinct from
+ * the fuel ramp (primary → error) by anchor choice, not by hardcoded
+ * palette.
+ */
+fun budgetGaugeColor(spentFraction: Float, under: Color, over: Color): Color {
+    val t = spentFraction.coerceIn(0f, 1f)
+    return rampColor(t, under, over, HueDirection.Shorter)
+}
