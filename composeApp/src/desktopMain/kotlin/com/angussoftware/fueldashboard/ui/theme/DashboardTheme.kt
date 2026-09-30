@@ -25,12 +25,14 @@ actual fun DashboardTheme(
         ThemeMode.SYSTEM -> {
             // Track the system theme so switches propagate while running
             // (Compose's isSystemInDarkTheme() always returns false on JVM).
-            // Primary path is event-driven: `gsettings monitor` emits a line the
-            // instant the setting changes (no polling delay). Fallback for
-            // non-GNOME environments without gsettings: poll every 30s.
+            // Event-driven on Linux (gsettings monitor emits instantly).
+            // Windows: no event stream — poll the registry every 2s
+            // (cheap: one `reg query` spawn; Settings flips rarely).
+            // Non-GNOME Linux without gsettings: poll every 30s.
             var systemDark by remember { mutableStateOf(isSystemDarkMode()) }
             LaunchedEffect(Unit) {
-                val monitor = try {
+                val windows = System.getProperty("os.name", "").lowercase().contains("windows")
+                val monitor = if (windows) null else try {
                     ProcessBuilder("gsettings", "monitor", "org.gnome.desktop.interface", "color-scheme")
                         .redirectErrorStream(true)
                         .start()
@@ -38,9 +40,9 @@ actual fun DashboardTheme(
                     null
                 }
                 if (monitor == null) {
-                    // No gsettings — poll fallback
+                    // No gsettings (or Windows) — poll fallback
                     while (true) {
-                        delay(30_000)
+                        delay(if (windows) 2_000 else 30_000)
                         systemDark = isSystemDarkMode()
                     }
                 } else {
@@ -71,12 +73,15 @@ actual fun DashboardTheme(
 }
 
 /**
- * Detects system dark mode on Linux desktop (GNOME/KDE/etc).
+ * Detects system dark mode on desktop (Windows/Linux).
  * Compose's isSystemInDarkTheme() always returns false on JVM — this is a workaround.
- * Checks gsettings (GNOME), then falls back to GTK theme name inspection.
+ * Windows: registry AppsUseLightTheme. Linux: gsettings (GNOME), then GTK/KDE fallbacks.
  */
 private fun isSystemDarkMode(): Boolean {
     return try {
+        if (System.getProperty("os.name", "").lowercase().contains("windows")) {
+            return isWindowsDarkMode()
+        }
         // GNOME: check org.gnome.desktop.interface color-scheme
         val process = ProcessBuilder("gsettings", "get", "org.gnome.desktop.interface", "color-scheme")
             .redirectErrorStream(true)
@@ -115,6 +120,31 @@ private fun isSystemDarkMode(): Boolean {
         }
 
         false
+    } catch (_: Exception) {
+        false
+    }
+}
+
+/**
+ * Windows dark-mode detection via registry:
+ * HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme
+ * 0x1 = light, 0x0 = dark. Reg-free read through `reg query` (available on all
+ * Windows 10+). Missing value (older builds) → light, matching OS default.
+ */
+private fun isWindowsDarkMode(): Boolean {
+    return try {
+        val process = ProcessBuilder(
+            "reg", "query",
+            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+            "/v", "AppsUseLightTheme"
+        )
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().readText()
+        process.waitFor()
+        // Match "0x0" (dark). Any other value (0x1, missing, error text) → light.
+        val match = Regex("AppsUseLightTheme\\s+REG_DWORD\\s+0x(\\d+)").find(output)
+        match?.groupValues?.get(1) == "0"
     } catch (_: Exception) {
         false
     }
