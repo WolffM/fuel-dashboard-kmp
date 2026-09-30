@@ -62,6 +62,46 @@ Notes:
 - Desktop only. Mobile resolves literals and reports a reference as
   unresolvable rather than polling without a key.
 
+### Several Claude subscriptions
+
+The **Claude Code (plan)** provider reads the OAuth login Claude Code keeps on
+this machine, so with nothing configured it watches `~/.claude`. To watch more
+than one subscription, give each account its own Claude Code configuration
+directory and add one plan provider per account:
+
+1. Log the second account into its own directory:
+   `CLAUDE_CONFIG_DIR=~/.claude-accounts/work claude /login` — or add the
+   provider first and press **Log in** on its card, which opens that same
+   login in a terminal.
+2. On the provider, set **Claude config dir** to that directory. Blank means
+   `~/.claude`.
+
+Each provider then reads its own account's token, and the dashboard tells the
+accounts apart by where their sessions are registered: the account with live
+sessions is marked **● IN USE**. If none — or more than one — has sessions,
+nothing is marked rather than a guess.
+
+Every account's session registry counts towards the idle gate, since a swap
+restarts sessions whichever subscription they run on.
+
+**Keeping an idle account's gauge alive.** The token in an account's local
+login is short-lived and only refreshed while Claude Code is running as that
+account, so an account nothing runs on goes unreadable within hours. An
+unreadable gauge is never chosen as an automatic swap target. To avoid that,
+put a long-lived token in the provider's credential field instead:
+
+```
+claude setup-token                      # run while logged in as that account
+```
+
+then paste the token, or reference it — `cmd:`, `env:` and `file:` work as for
+any other provider, so it can come from a vault. Blank still means "use the
+local login". Claude Code itself accepts the same token as
+`CLAUDE_CODE_OAUTH_TOKEN`.
+
+Neither the config directory nor a credential reference is ever accepted from
+settings sync: both name something on the receiving machine.
+
 ## HTTP API
 
 All data endpoints require `Authorization: Bearer <api key>`. `/health` is open for uptime monitors.
