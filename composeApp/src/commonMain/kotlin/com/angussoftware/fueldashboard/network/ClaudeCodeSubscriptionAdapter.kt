@@ -37,14 +37,21 @@ import kotlin.math.roundToInt
  * provider is re-read on every poll so a `/login` refresh is picked up
  * without restarting.
  *
- * More than one account can be watched at once by giving each provider its own
- * [configDir]. Note what that does NOT buy: only the account Claude Code is
- * currently running as gets its access token refreshed, and those tokens live
- * for hours while the refresh token lives for weeks. An account nothing is
- * running under therefore goes unreadable on its own, and this adapter reports
- * that as unknown rather than minting a token — which is correct, and is also
- * why an idle account is never an automatic swap target (see `SwapTarget`).
- * Keeping an idle account readable is a job for whatever owns the switch.
+ * More than one account can be watched at once, in either of two ways.
+ *
+ * Give each provider its own [configDir] and each reads that account's local
+ * login. The catch is lifetime: only the account Claude Code is currently
+ * running as gets its access token refreshed, and those tokens live for hours
+ * while the refresh token lives for weeks. An account nothing is running under
+ * therefore goes unreadable on its own, which this reports as unknown rather
+ * than minting a token — correct, but it also means an idle account is never an
+ * automatic swap target (see `SwapTarget`).
+ *
+ * Or give each provider a [suppliedToken] through the credential field. A
+ * long-lived token from `claude setup-token` does not expire on the timescale
+ * of a poll, so an idle account keeps reporting and stays a candidate for an
+ * automatic swap. That is the reason to prefer it, beyond keeping the
+ * credential out of a file.
  *
  * Desktop only. Android and iOS have no access to the credentials file, so
  * [poll] fails there with a clear message; mobile receives this gauge the
@@ -71,8 +78,23 @@ class ClaudeCodeSubscriptionAdapter(
      * picked up after a `/login` or a switch without restarting.
      */
     private val configDir: String? = null,
-    /** Overridden in tests; production reads the local Claude Code credentials. */
-    private val tokenProvider: () -> String? = { readClaudeCodeOAuthToken(configDir) },
+    /**
+     * A bearer token supplied by settings, or null to read this machine's
+     * local Claude Code login.
+     *
+     * This is the vault path. The provider's credential field accepts the same
+     * `cmd:` / `env:` / `file:` references every other provider's key does, so
+     * a token can come from a broker on each activation instead of sitting in
+     * a file — which is what `claude setup-token` produces and what
+     * `CLAUDE_CODE_OAUTH_TOKEN` feeds Claude Code itself.
+     *
+     * Blank means the status quo: read the login at [configDir]. That keeps
+     * every existing install working untouched, and keeps the zero-config case
+     * genuinely zero-config.
+     */
+    private val suppliedToken: String? = null,
+    /** Overridden in tests; production applies [claudeCodeBearerToken]. */
+    private val tokenProvider: () -> String? = { claudeCodeBearerToken(suppliedToken, configDir) },
 ) : ProviderAdapter {
 
     override val displayName: String = customDisplayName ?: "Claude Code"
@@ -197,6 +219,22 @@ class ClaudeCodeSubscriptionAdapter(
 
     override fun close() = Unit
 }
+
+/**
+ * The bearer token a plan provider polls with: a token supplied through
+ * settings when there is one, otherwise the local Claude Code login for
+ * [configDir].
+ *
+ * A top-level function rather than inline in the adapter so the precedence is
+ * tested directly. Blank counts as "not supplied", because that is what an
+ * empty credential field resolves to, and it must mean "use the local login"
+ * rather than "send an empty bearer".
+ */
+internal fun claudeCodeBearerToken(
+    suppliedToken: String?,
+    configDir: String?,
+    readLocalLogin: (String?) -> String? = { readClaudeCodeOAuthToken(it) },
+): String? = suppliedToken?.takeIf { it.isNotBlank() } ?: readLocalLogin(configDir)
 
 /**
  * Raised when the usage endpoint answers with a non-2xx status.
