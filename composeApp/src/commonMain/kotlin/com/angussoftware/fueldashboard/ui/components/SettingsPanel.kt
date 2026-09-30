@@ -1170,10 +1170,12 @@ internal fun ProviderConfigRow(
                         label = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    if (config.kind == ProviderKind.CONNECTED_API) {
-                                        "Server API Key (optional)"
-                                    } else {
-                                        "API Key"
+                                    when (config.kind) {
+                                        ProviderKind.CONNECTED_API -> "Server API Key (optional)"
+                                        // Same wording as the add dialog: blank is
+                                        // valid and means the local login.
+                                        ProviderKind.CLAUDE_CODE -> "OAuth token (optional)"
+                                        else -> "API Key"
                                     },
                                 )
                                 if (showHelp) {
@@ -1520,11 +1522,17 @@ private fun AddProviderDialog(
             )
             Spacer(Modifier.height(4.dp))
 
-            // API key — required for most providers, optional for Connected API.
-            // Claude Code has none to enter: it reads the OAuth token Claude
-            // Code already stores locally, so an empty field would just invite
-            // someone to paste a console API key that this provider ignores.
-            if (selectedKind != ProviderKind.JUNIE && selectedKind != ProviderKind.CLAUDE_CODE) {
+            // API key — required for most providers, optional for Connected API
+            // and for Claude Code.
+            //
+            // For Claude Code, blank means "read the OAuth login Claude Code
+            // already stores locally", which needs no configuration. A value is
+            // a long-lived token from `claude setup-token`, optionally as a
+            // `cmd:`/`env:`/`file:` reference: it keeps the credential out of a
+            // file, and because it does not expire on the timescale of a poll it
+            // keeps an idle account's gauge alive. The label says optional so the
+            // field cannot be mistaken for a required one.
+            if (selectedKind != ProviderKind.JUNIE) {
                 OutlinedTextField(
                     value = apiKey,
                     onValueChange = { apiKey = it },
@@ -1532,19 +1540,25 @@ private fun AddProviderDialog(
                     label = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                if (selectedKind == ProviderKind.CONNECTED_API) {
-                                    "Server API Key (optional)"
-                                } else {
-                                    "${selectedKind.displayName} API Key"
+                                when (selectedKind) {
+                                    ProviderKind.CONNECTED_API -> "Server API Key (optional)"
+                                    ProviderKind.CLAUDE_CODE -> "OAuth token (optional)"
+                                    else -> "${selectedKind.displayName} API Key"
                                 },
                             )
                             if (showHelp) {
                                 Spacer(Modifier.width(4.dp))
                                 HelpIcon(
-                                    if (selectedKind == ProviderKind.CONNECTED_API) {
-                                        "API key for the remote dashboard's server (required if the remote dashboard has auth enabled)"
-                                    } else {
-                                        "Stored locally, never shared."
+                                    when (selectedKind) {
+                                        ProviderKind.CONNECTED_API ->
+                                            "API key for the remote dashboard's server (required if the remote dashboard has auth enabled)"
+                                        ProviderKind.CLAUDE_CODE ->
+                                            "Leave blank to read this machine's Claude Code login. " +
+                                                "Or paste a long-lived token from `claude setup-token` — " +
+                                                "a cmd:/env:/file: reference works, so it can come from a vault " +
+                                                "instead of a file, and a token that does not expire keeps an " +
+                                                "idle account's gauge alive."
+                                        else -> "Stored locally, never shared."
                                     },
                                 )
                             }

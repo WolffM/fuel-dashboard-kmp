@@ -1342,6 +1342,12 @@ class FuelViewModel(
                 baseUrl = config.resolvedServerUrl(),
                 customDisplayName = config.resolvedDisplayName(),
                 configDir = config.claudeConfigDir.trim().ifBlank { null },
+                // Blank is not "no credential" for this kind — it means read
+                // the local login, which is what a single-subscription install
+                // has always done. A value is a bearer token, and it has
+                // already been through SecretRef, so a vault reference has
+                // become the token itself by here.
+                suppliedToken = resolvedKey.ifBlank { null },
             )
             ProviderKind.CONNECTED_API -> ConnectedApiProviderAdapter(
                 providerId = config.id,

@@ -70,6 +70,14 @@ class ClaudeAccountSettingsUiTest {
     }
 
     @Test
+    fun aPlanProvidersCredentialFieldSaysWhatItIs() {
+        settingsRow(plan) {
+            onNodeWithText("OAuth token (optional)").assertExists()
+            onNodeWithText("API Key").assertDoesNotExist()
+        }
+    }
+
+    @Test
     fun otherProvidersHaveNoConfigDirField() {
         settingsRow(zai) {
             onNodeWithText("Claude config dir (optional)").assertDoesNotExist()
