@@ -18,6 +18,9 @@ import com.angussoftware.fueldashboard.model.ClaudeCodeFleet
 import com.angussoftware.fueldashboard.model.ClaudeCodeRoute
 import com.angussoftware.fueldashboard.model.ProviderConfig
 import com.angussoftware.fueldashboard.network.ClaudeCodeUsageHttpException
+import com.angussoftware.fueldashboard.network.ClaudeLoginLaunch
+import com.angussoftware.fueldashboard.network.claudeLoginSupported
+import com.angussoftware.fueldashboard.network.launchClaudeLogin
 import com.angussoftware.fueldashboard.model.readClaudeCodeFleet
 import com.angussoftware.fueldashboard.model.readClaudeCodeRoute
 import com.angussoftware.fueldashboard.settings.SecretRef
@@ -316,6 +319,18 @@ data class DashboardState(
     val swappingProviderIds: Set<String> = emptySet(),
     /** Result of the last manual swap per provider, until the next poll clears it. */
     val switchResults: Map<String, SwitchRunStatus> = emptyMap(),
+    /** Plan providers whose login terminal is being opened right now. */
+    val loggingInProviderIds: Set<String> = emptySet(),
+    /**
+     * Outcome of the last login launch per provider.
+     *
+     * Kept until the account next reports successfully, not cleared on every
+     * poll like [switchResults]: a login takes as long as a person takes, so
+     * the line has to survive the polls that happen while they are in the
+     * browser. What retires it is the gauge filling in — which is the only
+     * real evidence the login worked.
+     */
+    val loginResults: Map<String, ClaudeLoginLaunch> = emptyMap(),
     val fuelProjection: FuelProjection? = null,
     val modelDrainRates: List<ModelDrainRateDisplay> = emptyList(),
     val fuelHistory: List<Double> = emptyList(),
@@ -373,6 +388,13 @@ class FuelViewModel(
     private val routeReader: (String?) -> ClaudeCodeRoute? = { readClaudeCodeRoute(it) },
     /** Overridden in tests; production spawns the real process. */
     private val switchRunner: suspend (String) -> SwitchCommandResult = { runSwitchCommand(it) },
+    /**
+     * Overridden in tests; production opens a terminal running `claude /login`
+     * for the given config dir. Injected for the same reason as [switchRunner]:
+     * the real launcher opens a window, so without a seam the login flow's
+     * state handling could not be tested at all.
+     */
+    private val loginLauncher: suspend (String?) -> ClaudeLoginLaunch = { launchClaudeLogin(it) },
 ) {
 
     companion object {
@@ -1331,6 +1353,88 @@ class FuelViewModel(
     }
 
     /**
+     * Opens an interactive `claude /login` for one plan provider's account.
+     *
+     * The seatbelt that guards a swap is deliberately absent here, because the
+     * hazards are not the same. A swap respawns every pane and kills whatever
+     * turn is in flight; a login opens a window and writes one file. Gating it
+     * on an idle fleet would block the fix at exactly the moment it is needed —
+     * an expired account is most likely to be noticed while people are working.
+     *
+     * What it cannot report is success. The OAuth flow finishes in a browser,
+     * minutes later, out of this process's sight. So the message says a login
+     * was opened, and the gauge filling in is what says it worked.
+     */
+    fun logInToClaudeAccount(providerId: String) {
+        if (!claudeLoginSupported) return
+        val config = _state.value.settings.providers.firstOrNull { it.id == providerId } ?: return
+        // Only this kind has an account to log in to. Every other provider
+        // authenticates with a key that is pasted, referenced or absent.
+        if (config.kind != ProviderKind.CLAUDE_CODE) return
+        // Two terminals for one account is never what was wanted; the second
+        // login would race the first for the same credentials file.
+        if (providerId in _state.value.loggingInProviderIds) return
+
+        _state.update { it.copy(
+            loggingInProviderIds = it.loggingInProviderIds + providerId,
+            loginResults = it.loginResults - providerId,
+        ) }
+
+        scope.launch {
+            // Never let a launch failure escape: this is a button, and an
+            // exception here would take the poll loop's scope with it.
+            val result = runCatching {
+                loginLauncher(config.claudeConfigDir.trim().ifBlank { null })
+            }.getOrElse { e ->
+                ClaudeLoginLaunch(
+                    launched = false,
+                    message = "Could not open a login: ${e::class.simpleName} ${e.message.orEmpty()}".trim(),
+                )
+            }
+
+            // Worth a decision-log row for the same reason a refused swap is:
+            // otherwise "I pressed it and nothing happened" leaves no trace.
+            onDecisionLogged?.invoke(
+                "claude-login",
+                config.claudeConfigDir.trim().ifBlank { "~/.claude" }.take(120),
+                config.id,
+                "action",
+                if (result.launched) "ok" else "failed",
+                // A login is not a quota event, so there is no utilization to
+                // report. 0.0 / 0 are the only honest fillers for a row shaped
+                // around fuel readings — the reason field carries the meaning.
+                0.0,
+                0,
+                if (result.launched) {
+                    "login opened for ${config.resolvedDisplayName()}"
+                } else {
+                    "login not opened for ${config.resolvedDisplayName()} — ${result.message.take(160)}"
+                },
+            )
+
+            _state.update { it.copy(
+                loggingInProviderIds = it.loggingInProviderIds - providerId,
+                loginResults = it.loginResults + (providerId to result),
+            ) }
+        }
+    }
+
+    /**
+     * Which login status lines survive a refresh.
+     *
+     * Retired by evidence rather than time: a line stays until that account
+     * reports a usable reading, which is the only confirmation the login took.
+     * The OAuth flow takes as long as a person takes, so clearing on the next
+     * poll would wipe the line while they are still in the browser — and a
+     * failed launch stays too, since no poll makes "could not open a terminal"
+     * stale.
+     */
+    internal fun retainLoginResults(
+        results: Map<String, ClaudeLoginLaunch>,
+        reports: Map<String, ProviderReport>,
+    ): Map<String, ClaudeLoginLaunch> = results.filterKeys { id -> reports[id]?.available != true }
+
+    /**
      * One reading of every configured Claude account: each registry, their sum,
      * and which account (if any) is the one running.
      *
@@ -1880,6 +1984,11 @@ class FuelViewModel(
             switchResults = current.switchResults.filterKeys {
                 it !in reports.keys || it in current.swappingProviderIds
             },
+            // A login line is retired by evidence, not by time: it stays until
+            // that account actually reports a reading, which is the only thing
+            // that confirms the login took. A failed launch stays put too —
+            // nothing about a poll makes "could not open a terminal" stale.
+            loginResults = retainLoginResults(current.loginResults, reports),
             providerErrors = errors,
             fuel = fuel,
             decisions = decisions,

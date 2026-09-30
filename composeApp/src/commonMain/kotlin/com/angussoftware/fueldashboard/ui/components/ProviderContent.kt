@@ -68,6 +68,12 @@ fun ProviderContent(
     switchStatus: SwitchRunStatus? = null,
     /** Retries the swap past a fleet-gate refusal. Null when not offered. */
     onSwapAnyway: (() -> Unit)? = null,
+    /** True while this account's login terminal is being opened. */
+    isLoggingIn: Boolean = false,
+    /** Non-null only for a plan provider on a platform that can open a login. */
+    onLogIn: (() -> Unit)? = null,
+    /** What came of the last login launch, or null when there has not been one. */
+    loginStatus: com.angussoftware.fueldashboard.network.ClaudeLoginLaunch? = null,
     /**
      * When this provider may be polled again after a server asked us to back
      * off, or null when it is not parked.
@@ -110,6 +116,16 @@ fun ProviderContent(
                 isActive = isServingClaudeCode,
                 onSwapNow = onSwapNow,
                 )
+                // The step the app cannot take for you. Beside the swap button
+                // because both are actions on this one provider, and a login is
+                // most often wanted for the account you are about to swap to.
+                ClaudeLoginButton(
+                    isLoggingIn = isLoggingIn,
+                    // An absent or expired token looks exactly like this from
+                    // here: polled, answered with nothing usable.
+                    needsCredentials = error != null || report?.available != true,
+                    onLogIn = onLogIn,
+                )
             }
             if (error != null) {
                 Text("\u26A0 Error", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
@@ -132,6 +148,15 @@ fun ProviderContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        // Outcome of the last login, placed above every early return below.
+        // The card an operator logs in from is usually the one showing an
+        // error or still connecting — the states that return early — so down
+        // with the swap status it would never be seen when it matters.
+        if (loginStatus != null) {
+            Spacer(Modifier.height(4.dp))
+            ClaudeLoginStatus(loginStatus)
         }
 
         if (error != null) {
