@@ -251,7 +251,6 @@ fun ProviderContent(
         if (switchStatus != null) {
             Spacer(Modifier.height(6.dp))
             ProviderSwapStatus(switchStatus, onOverride = onSwapAnyway)
-            ClaudeLoginStatus(loginStatus)
         }
 
         // Gemini: Google exposes no quota/usage API for API keys — limits,

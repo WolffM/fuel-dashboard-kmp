@@ -4,6 +4,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
@@ -13,6 +15,7 @@ import com.angussoftware.fueldashboard.model.ProviderKind
 import com.angussoftware.fueldashboard.model.ProviderReport
 import com.angussoftware.fueldashboard.model.ProviderType
 import com.angussoftware.fueldashboard.network.ClaudeLoginLaunch
+import com.angussoftware.fueldashboard.presentation.SwitchRunStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -43,6 +46,7 @@ class ClaudeLoginUiTest {
         onLogIn: (() -> Unit)? = {},
         isLoggingIn: Boolean = false,
         loginStatus: ClaudeLoginLaunch? = null,
+        switchStatus: SwitchRunStatus? = null,
         assertions: ComposeUiTest.() -> Unit,
     ) = runDesktopComposeUiTest {
         setContent {
@@ -61,6 +65,7 @@ class ClaudeLoginUiTest {
                         isLoggingIn = isLoggingIn,
                         onLogIn = onLogIn,
                         loginStatus = loginStatus,
+                        switchStatus = switchStatus,
                     )
                 }
             }
@@ -134,6 +139,22 @@ class ClaudeLoginUiTest {
     fun theOutcomeIsShownWhileTheCardIsStillConnecting() {
         card(report = null, loginStatus = ClaudeLoginLaunch(launched = true, message = "Opened a login")) {
             onNodeWithText("→ Opened a login").assertExists()
+        }
+    }
+
+    @Test
+    fun theOutcomeIsShownOnceEvenAlongsideASwapResult() {
+        // A card can carry both at once: a swap that was just refused and a
+        // login opened to fix the account. The login line has one home, above
+        // the card's early returns, and must not also appear with the swap
+        // status.
+        card(
+            report = reading(available = true),
+            loginStatus = ClaudeLoginLaunch(launched = true, message = "Opened a login"),
+            switchStatus = SwitchRunStatus(ok = false, message = "Not swapped — 1 of 3 sessions still working."),
+        ) {
+            onAllNodesWithText("→ Opened a login").assertCountEquals(1)
+            onAllNodesWithText("⚠ Not swapped — 1 of 3 sessions still working.").assertCountEquals(1)
         }
     }
 }
