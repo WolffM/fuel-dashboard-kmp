@@ -2,6 +2,23 @@
 
 Real failure modes, observed in production, with their fixes.
 
+## App refuses to start: "LD_LIBRARY_PATH points into an AppImage mount"
+
+The dashboard was started by something packaged as an AppImage — an editor,
+an agent, a launcher — and inherited its library path, which points inside
+that AppImage's temporary mount (`/tmp/.mount_…`). Libraries loaded from
+there disappear when the AppImage exits, and the dashboard would then crash
+with `SIGBUS`, possibly hours later. It refuses at startup instead.
+
+Start it without the inherited path:
+
+```
+env -u LD_LIBRARY_PATH -u APPDIR fuel-dashboard
+```
+
+or from a normal terminal or service unit. For a deliberately short session,
+`FUEL_DASHBOARD_ALLOW_EPHEMERAL_LIBS=1` skips the check.
+
 ## App crashes at startup: `NoClassDefFoundError`
 
 ```

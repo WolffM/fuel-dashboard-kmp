@@ -31,8 +31,16 @@ private const val HEADLESS_FLAG = "--headless"
  * orchestrator can be a systemd service on a machine with no display.
  */
 fun main(args: Array<String>) {
-    // Before anything else: an SLF4J-using library that initializes first
-    // pins the logging config for the rest of the process.
+    // First of all, before logging or anything else touches the machine: a
+    // process that inherited an AppImage's library path will die of SIGBUS when
+    // that AppImage exits, so it must not start at all. See EphemeralLibraryPath.
+    EphemeralLibraryPath.refusal(System.getenv(), System.getProperty("os.name").orEmpty())?.let {
+        System.err.println(it)
+        kotlin.system.exitProcess(EphemeralLibraryPath.EXIT_CODE)
+    }
+
+    // Then: an SLF4J-using library that initializes first pins the logging
+    // config for the rest of the process.
     DashboardBackend.configureFileLogging()
 
     var headless = false

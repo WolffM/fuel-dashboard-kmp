@@ -259,41 +259,6 @@ sqldelight {
 }
 
 // Hermetic tests: the desktop SettingsStore actual backs onto
-// Refuse to launch the long-running desktop app out of a temp directory.
-//
-// A 19-hour session once died with SIGBUS inside ld-linux while the JVM was
-// shutting down (hs_err_pid1292924, dropped in 2861897). The stack looks like a
-// native-library bug, but the cause is in the command line: the project — and
-// therefore the jars the JVM had mmap'd and the compose resources dir — lived
-// under /tmp/fix40. systemd-tmpfiles reaps /tmp on an age policy, so the files
-// backing those mappings were deleted from under a live process; touching a
-// mapping whose backing file is gone raises SIGBUS, not an IOException, and no
-// amount of Kotlin-level error handling can catch it.
-//
-// This app is meant to run for days, which is exactly the exposure. A dev
-// worktree under /tmp is the only way to hit it, so the fix belongs here rather
-// than in the app: fail at launch with the reason instead of crashing 19 hours
-// later with a stack that points at the wrong thing. Compilation and tests are
-// deliberately unaffected — they are short-lived, and blocking them would make
-// a scratch checkout useless for no safety gain.
-val tmpRoots = listOf("/tmp/", "/var/tmp/", "/dev/shm/")
-tasks.matching { it.name == "run" || it.name == "runDistributable" }.configureEach {
-    doFirst {
-        val projectPath = layout.projectDirectory.asFile.absolutePath + "/"
-        val offending = tmpRoots.firstOrNull { projectPath.startsWith(it) }
-        if (offending != null) {
-            throw GradleException(
-                "Refusing to run from $offending — this project is at $projectPath.\n" +
-                    "Temp directories are reaped on an age policy, and this app is meant to " +
-                    "run for days: when the reaper deletes a jar the JVM has mmap'd, the " +
-                    "process dies with SIGBUS (see the note above this check).\n" +
-                    "Move the checkout somewhere durable, e.g. a worktree under " +
-                    ".claude/worktrees/, and run it from there.",
-            )
-        }
-    }
-}
-
 // Preferences.userRoot() (filesystem under $user.home/.java/.userprefs on
 // Linux). Without isolation, tests constructing FuelViewModel would load the
 // dev machine's REAL provider configs (live API keys) and re-import flows
