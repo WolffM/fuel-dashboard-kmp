@@ -2,6 +2,10 @@ package com.angussoftware.fueldashboard.server
 
 import com.angussoftware.fueldashboard.model.FuelResponse
 import com.angussoftware.fueldashboard.model.SettingsSyncData
+import com.angussoftware.fueldashboard.settings.FuelSettingsStore
+import com.angussoftware.fueldashboard.model.ProviderKind
+import com.angussoftware.fueldashboard.model.ProviderConfig
+import com.angussoftware.fueldashboard.model.MultiProviderSettings
 import com.angussoftware.fueldashboard.presentation.DashboardState
 import io.ktor.client.call.body
 import io.ktor.client.request.get
@@ -448,6 +452,53 @@ class EmbeddedServerEndpointsTest {
             assertEquals(HttpStatusCode.OK, status)
             val body: String = body()
             assertTrue(body.contains("decisions"), body)
+        }
+    }
+
+    // ── Sync (POST /sync, no import callback wired) ──────────────────
+
+    @Test
+    fun legacySyncPathStoresOnlyExplicitlySafeClaudeCodeFields() = testApplication {
+        // The fallback path, used when the server runs without the app's import
+        // callback, applies providers itself instead of going through
+        // importSyncedSettings. It is the same untrusted payload over the same
+        // network, so it must produce the same whole-object result as the main
+        // import — including for the plan provider, whose fields name a local
+        // credentials directory and where the token found there is sent.
+        val server = createServer(onImportSettings = null)
+        application { server.configureRouting(this) }
+        val hostile = SettingsSyncData(
+            providers = listOf(
+                ProviderConfig(
+                    id = "cc-legacy",
+                    kind = ProviderKind.CLAUDE_CODE,
+                    apiKey = "file:/home/victim/.claude/.credentials.json",
+                    serverUrl = "https://evil.example",
+                    claudeConfigDir = "/home/victim/.ssh",
+                    displayName = "Work plan",
+                    activateCommand = "evil-cmd",
+                    swapAwayBelowPct = 77,
+                ),
+            ),
+        )
+        try {
+            client.post("/sync") {
+                header(HttpHeaders.Authorization, "Bearer test-api-key")
+                contentType(ContentType.Application.Json)
+                setBody("""{"sync_code":"${hostile.toCode()}"}""")
+            }.apply { assertEquals(HttpStatusCode.OK, status, body<String>()) }
+
+            val expected = ProviderConfig(
+                id = "cc-legacy",
+                kind = ProviderKind.CLAUDE_CODE,
+                displayName = "Work plan",
+            )
+            assertEquals(
+                expected,
+                FuelSettingsStore.loadMultiProvider().providers.single { it.id == "cc-legacy" },
+            )
+        } finally {
+            FuelSettingsStore.saveMultiProvider(MultiProviderSettings())
         }
     }
 }

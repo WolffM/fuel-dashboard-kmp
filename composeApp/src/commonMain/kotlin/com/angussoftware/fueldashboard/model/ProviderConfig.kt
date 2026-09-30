@@ -100,6 +100,33 @@ data class ProviderConfig(
      * [com.angussoftware.fueldashboard.engine.SwitchCommandTrigger].
      */
     val swapAwayBelowPct: Int = 0,
+    /**
+     * Which Claude Code configuration directory this provider reads, for
+     * [ProviderKind.CLAUDE_CODE] only. Blank means `~/.claude` — the single
+     * account Claude Code uses when `CLAUDE_CONFIG_DIR` is unset, which is
+     * exactly the behaviour every existing install already has.
+     *
+     * This field is what makes more than one Claude subscription visible at
+     * once. Without it every CLAUDE_CODE provider reads the same
+     * `~/.claude/.credentials.json`, so a second account renders a duplicate
+     * of the first gauge rather than its own.
+     *
+     * It names a DIRECTORY, not a credentials file, because everything this
+     * app reads about an account lives in the same directory and must agree:
+     * `.credentials.json` for the token, `sessions/` for the idle gate, and
+     * `settings.json` for the routing sensor. Pointing the token at one
+     * account while the session registry answered for another is how a swap
+     * gets cleared by the wrong fleet.
+     *
+     * Never accepted from a synced payload — see the strip in
+     * `FuelViewModel.applySyncedSettings` and `EmbeddedServer`'s /sync. An
+     * imported value is an arbitrary local path whose contents this machine
+     * would read and then send as a bearer token, which is the same hazard as
+     * an imported `file:` credential reference.
+     *
+     * Desktop only; mobile has no access to these files either way.
+     */
+    val claudeConfigDir: String = "",
 ) {
     /**
      * Resolved display name: custom name > provider's default.
@@ -138,6 +165,9 @@ data class ProviderConfig(
             ProviderKind.JUNIE -> true
             // Authenticates with the OAuth token Claude Code already stores
             // locally — there is no key to paste, so adding it is enough.
+            // A blank claudeConfigDir is not unconfigured: it is the default
+            // account at ~/.claude, which is what a single-subscription
+            // install has always used.
             ProviderKind.CLAUDE_CODE -> true
             else -> apiKey.isNotBlank()
         }

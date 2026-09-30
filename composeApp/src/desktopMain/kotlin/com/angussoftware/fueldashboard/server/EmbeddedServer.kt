@@ -433,6 +433,10 @@ class EmbeddedServer(
                             swapAwayBelowPct = 0,
                             apiKey = if (com.angussoftware.fueldashboard.settings.SecretRef.isReference(p.apiKey)) "" else p.apiKey,
                             serverUrl = if (p.kind == com.angussoftware.fueldashboard.model.ProviderKind.CLAUDE_CODE) "" else p.serverUrl,
+                            // Same hazard as serverUrl: an imported config directory is a
+                            // local path this machine would read a bearer token from. Never
+                            // accepted over the wire.
+                            claudeConfigDir = "",
                         )
                     }.toMutableList()
                     syncData.serverUrl?.let { url ->

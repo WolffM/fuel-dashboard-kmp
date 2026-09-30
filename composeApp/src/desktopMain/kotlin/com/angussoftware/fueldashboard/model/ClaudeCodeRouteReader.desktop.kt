@@ -7,15 +7,15 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 
 /**
- * Parses `~/.claude/settings.json` — the file Claude Code reads at launch and
- * the one a provider switch rewrites.
+ * Parses `settings.json` in one Claude Code configuration directory — the file
+ * Claude Code reads at launch and the one a provider switch rewrites.
  *
  * Only routing-relevant fields are read. Nothing here is written, and nothing
  * is cached: the file changes underneath us whenever the provider is switched,
  * so each poll re-reads it.
  */
-internal actual fun readClaudeCodeRoute(): ClaudeCodeRoute? {
-    val file = File(System.getProperty("user.home"), ".claude/settings.json")
+internal actual fun readClaudeCodeRoute(configDir: String?): ClaudeCodeRoute? {
+    val file = File(resolveClaudeConfigDir(configDir), "settings.json")
     if (!file.isFile || !file.canRead()) return null
 
     val root = runCatching {

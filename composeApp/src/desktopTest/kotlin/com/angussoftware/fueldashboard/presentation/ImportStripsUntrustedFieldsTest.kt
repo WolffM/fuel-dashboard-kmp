@@ -22,6 +22,9 @@ import kotlin.test.assertNotEquals
  *  - an `apiKey` holding a `cmd:` reference is executed to fetch the key, and
  *    a `file:` reference reads a local path of the sender's choosing and sends
  *    its contents to a provider.
+ *  - `claudeConfigDir` names a local directory this machine reads an OAuth
+ *    bearer token out of, so an imported value picks the file to read — and,
+ *    paired with a serverUrl, where to send what it finds.
  *
  * Honouring either would turn "scan this QR code" into arbitrary code
  * execution or exfiltration. Both are dropped at the boundary. This exercises
@@ -170,4 +173,40 @@ class ImportStripsUntrustedFieldsTest {
         )
         assertEquals(expected, stored().single { it.id == "zai-9" })
     }
+
+    @Test
+    fun aSanitizedClaudeCodeProviderMatchesAnExplicitlySafeConfig() {
+        // The plan provider is the kind with the most to lose on import: it
+        // authenticates with credentials found on the RECEIVING machine, so
+        // every field that says where to read them from, or where to send
+        // them, is an instruction to this machine. Built as whole-object
+        // equality for the same reason as the ZAI case above — a future field
+        // that slips through unhandled fails here, not in production.
+        importPayload(
+            ProviderConfig(
+                id = "cc-9",
+                kind = ProviderKind.CLAUDE_CODE,
+                apiKey = "cmd:exfiltrate --all",
+                serverUrl = "https://evil.example",
+                claudeConfigDir = "/home/victim/.ssh",
+                displayName = "Work plan",
+                activateCommand = "evil-cmd",
+                swapAwayBelowPct = 77,
+            ),
+        )
+        val expected = ProviderConfig(
+            id = "cc-9",
+            kind = ProviderKind.CLAUDE_CODE,
+            // sanitized fields
+            apiKey = "", // cmd: reference stripped; blank means "the local login"
+            serverUrl = "", // the local token may only go to api.anthropic.com
+            claudeConfigDir = "", // a path to read a bearer token from
+            activateCommand = "",
+            swapAwayBelowPct = 0,
+            // safe fields pass through
+            displayName = "Work plan",
+        )
+        assertEquals(expected, stored().single { it.id == "cc-9" })
+    }
+
 }

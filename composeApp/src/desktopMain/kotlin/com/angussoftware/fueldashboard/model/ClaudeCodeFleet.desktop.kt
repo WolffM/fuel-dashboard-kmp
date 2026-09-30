@@ -19,8 +19,8 @@ import java.io.File
  * A registry file whose process is gone is the genuinely stale case: Claude
  * Code leaves the file behind when a session dies without cleaning up.
  */
-internal actual fun readClaudeCodeFleet(): ClaudeCodeFleet? {
-    val dir = File(System.getProperty("user.home"), ".claude/sessions")
+internal actual fun readClaudeCodeFleet(configDir: String?): ClaudeCodeFleet? {
+    val dir = File(resolveClaudeConfigDir(configDir), "sessions")
     if (!dir.isDirectory || !dir.canRead()) return null
 
     // The directory also holds .key files, which are not session records.

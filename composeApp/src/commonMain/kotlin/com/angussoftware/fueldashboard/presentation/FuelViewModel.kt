@@ -354,19 +354,23 @@ data class DashboardState(
 class FuelViewModel(
     /**
      * Overridden in tests; production reads this machine's Claude Code session
-     * registry.
+     * registry for the configuration directory it is given.
      *
      * Injected because [readClaudeCodeFleet] is a top-level expect function,
      * which left the fleet gate — the only thing standing between a switch
      * command and a live agent turn — impossible to exercise in a test.
+     *
+     * Takes the directory because each Claude account under CLAUDE_CONFIG_DIR
+     * keeps its own `sessions/`, so the gate has to ask every configured
+     * account rather than only `~/.claude`.
      */
-    private val fleetReader: () -> ClaudeCodeFleet? = { readClaudeCodeFleet() },
+    private val fleetReader: (String?) -> ClaudeCodeFleet? = { readClaudeCodeFleet(it) },
     /**
      * Re-read after a swap to check whether it actually took effect. Injected
      * for the same reason as [fleetReader]: the underlying reader is a
      * top-level expect fun and this is the only way to test the verification.
      */
-    private val routeReader: () -> ClaudeCodeRoute? = { readClaudeCodeRoute() },
+    private val routeReader: (String?) -> ClaudeCodeRoute? = { readClaudeCodeRoute(it) },
     /** Overridden in tests; production spawns the real process. */
     private val switchRunner: suspend (String) -> SwitchCommandResult = { runSwitchCommand(it) },
 ) {
@@ -1088,11 +1092,21 @@ class FuelViewModel(
                 // serverUrl would direct that credential at a host of the
                 // sender's choosing. The default (api.anthropic.com) is the
                 // only destination a synced CLAUDE_CODE provider may have.
+                //
+                // claudeConfigDir closes the other half of that hole. It names
+                // a local directory this machine reads a bearer token out of,
+                // so an imported value picks BOTH the file to read and — paired
+                // with a serverUrl — where to send it. It is machine-specific
+                // regardless: the sender's account directories do not exist
+                // here. Blank falls back to ~/.claude, which is the same
+                // single-account behaviour a synced CLAUDE_CODE provider has
+                // always had.
                 val safe = p.copy(
                     activateCommand = "",
                     swapAwayBelowPct = 0,
                     apiKey = if (SecretRef.isReference(p.apiKey)) "" else p.apiKey,
                     serverUrl = if (p.kind == com.angussoftware.fueldashboard.model.ProviderKind.CLAUDE_CODE) "" else p.serverUrl,
+                    claudeConfigDir = "",
                 )
                 if (hasServer && safe.kind != com.angussoftware.fueldashboard.model.ProviderKind.CONNECTED_API) {
                     safe.copy(dormant = true)
@@ -1305,6 +1319,7 @@ class FuelViewModel(
                 providerId = config.id,
                 baseUrl = config.resolvedServerUrl(),
                 customDisplayName = config.resolvedDisplayName(),
+                configDir = config.claudeConfigDir.trim().ifBlank { null },
             )
             ProviderKind.CONNECTED_API -> ConnectedApiProviderAdapter(
                 providerId = config.id,
@@ -1314,6 +1329,104 @@ class FuelViewModel(
             )
         }
     }
+
+    /**
+     * One reading of every configured Claude account: each registry, their sum,
+     * and which account (if any) is the one running.
+     *
+     * The refresh, the swap gate and the post-swap check all need the same
+     * answer, and they must agree — a gate that counted different accounts from
+     * the one that drew the badge would clear a swap the UI said was unsafe.
+     */
+    private data class ClaudeAccounts(
+        val fleet: ClaudeCodeFleet?,
+        val liveProviderId: String?,
+        /** The live account's config dir; null for the default or when unknown. */
+        val liveConfigDir: String?,
+    )
+
+    private fun readClaudeAccounts(providers: List<ProviderConfig>): ClaudeAccounts {
+        val fleetByDir = claudeConfigDirs(providers).associateWith { fleetReader(it) }
+        val liveId = liveClaudeProviderId(providers, fleetByDir)
+        return ClaudeAccounts(
+            fleet = aggregateFleet(fleetByDir.values),
+            liveProviderId = liveId,
+            liveConfigDir = providers.firstOrNull { it.id == liveId }
+                ?.claudeConfigDir?.trim()?.ifBlank { null },
+        )
+    }
+
+    /**
+     * Every distinct Claude Code configuration directory worth reading, with
+     * null standing for the default `~/.claude`.
+     *
+     * Falls back to a single null entry when no plan provider is configured, so
+     * an install without one keeps reading exactly the one location it always
+     * did — the fleet gate protects live turns whether or not the dashboard
+     * happens to be watching the plan.
+     */
+    internal fun claudeConfigDirs(providers: List<ProviderConfig>): List<String?> =
+        providers
+            .filter { it.kind == ProviderKind.CLAUDE_CODE }
+            .map { it.claudeConfigDir.trim().ifBlank { null } }
+            .distinct()
+            .ifEmpty { listOf(null) }
+
+    /**
+     * One fleet reading for the whole machine, summed over every account.
+     *
+     * A directory that reads back null contributes nothing rather than an
+     * `unknown`, but only while some other directory did read: when every
+     * reading is null the answer is null, which is exactly what a
+     * single-account install returned before. The distinction matters because
+     * a configured account that has never been logged into has no `sessions/`
+     * at all, and counting that as unknown would make [ClaudeCodeFleet.isQuiet]
+     * permanently false — refusing every swap forever instead of protecting
+     * anything.
+     *
+     * The residual risk is a genuinely unreadable registry for an account that
+     * IS running, which would be missed. In practice a running account's
+     * `sessions/` exists and is readable because Claude Code just wrote it, so
+     * null means "never used here" rather than "cannot see".
+     */
+    internal fun aggregateFleet(readings: Collection<ClaudeCodeFleet?>): ClaudeCodeFleet? {
+        val known = readings.filterNotNull()
+        if (known.isEmpty()) return null
+        return known.reduce(ClaudeCodeFleet::plus)
+    }
+
+    /**
+     * Which plan provider Claude Code is actually running as, or null when that
+     * cannot be told apart.
+     *
+     * The sensor is the session registry: sessions appear under the
+     * configuration directory of the account they belong to, so the account
+     * with live sessions is the account in use. List order would only be a
+     * guess, since both accounts run against the same endpoint.
+     *
+     * Null for the two honest unknowns — nobody is running, and more than one
+     * account is (which per-account config directories make perfectly
+     * possible). "Both" is not an answer the "IN USE" badge can show, and
+     * naming one of them would be a coin flip.
+     *
+     * Two limits of the sensor. Accounts are told apart by directory, so two
+     * plan providers sharing one (say, both blank, one authenticating with a
+     * supplied token) always read as unknown. And every registered session
+     * counts, including the background daemon's pre-started spares, so an
+     * account whose daemon is still warm after a switch reads as live until
+     * that daemon exits.
+     */
+    internal fun liveClaudeProviderId(
+        providers: List<ProviderConfig>,
+        fleetByDir: Map<String?, ClaudeCodeFleet?>,
+    ): String? = providers
+        .filter { it.kind == ProviderKind.CLAUDE_CODE }
+        .filter { p ->
+            val fleet = fleetByDir[p.claudeConfigDir.trim().ifBlank { null }]
+            fleet != null && fleet.total > 0
+        }
+        .singleOrNull()
+        ?.id
 
     private fun closeAdapters() {
         adapters.values.forEach { runCatching { it.close() } }
@@ -1733,6 +1846,16 @@ class FuelViewModel(
         val dataPoints = primaryBurnRate?.history?.size ?: 0
         val burnRate = primaryBurnRate?.burnRatePerHr
 
+        // Read each account's session registry ONCE, before the update block.
+        // _state.update is a CAS loop whose lambda can run more than once, and
+        // these are file reads: doing them inside would re-read every registry
+        // per retry and could mix readings taken at different instants into one
+        // snapshot. Re-read every poll though — the files are rewritten
+        // underneath us whenever the provider is switched, so a cached value
+        // would go stale exactly when it matters most. Reads, never watches:
+        // see the note on readClaudeCodeOAuthToken.
+        val claudeAccounts = readClaudeAccounts(_state.value.settings.providers)
+
         _state.update { current ->
             // Generation guard (2 of 2): a refresh that crossed a settings
             // change must not resurrect removed providers (ghost tiles +
@@ -1767,17 +1890,19 @@ class FuelViewModel(
             // Only parks still in the future: an expired one is not a state
             // the card should keep announcing.
             rateLimitedUntil = rateLimitedUntil.filterValues { it > epochMillis() },
-            // Re-read each poll: the file is rewritten underneath us whenever
-            // the provider is switched, so a cached value would go stale
-            // exactly when it matters most. Goes through the fleetReader seam
-            // (not the top-level function) so injected test readers are
-            // honoured and tests never touch a real ~/.claude.
-            claudeCodeFleet = fleetReader(),
-            claudeCodeRoute = routeReader()?.let { route ->
+            // Summed over every configured account: a live turn is a live turn
+            // whichever subscription pays for it, so the gate must see the
+            // whole machine and not just the account being swapped away from.
+            claudeCodeFleet = claudeAccounts.fleet,
+            // Routing is read from the account actually in use — each account
+            // has its own settings.json, so reading the default location would
+            // report the wrong endpoint whenever a second account is live.
+            claudeCodeRoute = routeReader(claudeAccounts.liveConfigDir)?.let { route ->
                 route.copy(
                     matchedProviderId = ClaudeCodeRoute.matchProvider(
                         route.baseUrl,
                         current.settings.providers,
+                        liveClaudeProviderId = claudeAccounts.liveProviderId,
                     ),
                 )
             },
@@ -1949,7 +2074,10 @@ class FuelViewModel(
          */
         force: Boolean = false,
     ): SwitchRun {
-        val fleet = fleetReader()
+        // Every configured account, not just the default one. A swap respawns
+        // panes across the machine, so a turn running under the OTHER
+        // subscription is exactly as killable as one under this provider's.
+        val fleet = readClaudeAccounts(_state.value.settings.providers).fleet
         if (!force && (fleet == null || !fleet.isQuiet)) return SwitchRun.Refused(fleet)
         val overrode = force && (fleet == null || !fleet.isQuiet)
 
@@ -1997,11 +2125,23 @@ class FuelViewModel(
             return SwitchRunStatus(ok = false, message = "Swap failed — ${result.summary()}")
         }
 
-        val route = routeReader() ?: return SwitchRunStatus(
+        // Verify against the account that is live NOW, which after a
+        // successful swap should be the target. Reading the target's own
+        // directory would beg the question — it would confirm what that
+        // account's settings.json says regardless of which one Claude Code
+        // picked up.
+        val providersNow = _state.value.settings.providers
+        val accounts = readClaudeAccounts(providersNow)
+
+        val route = routeReader(accounts.liveConfigDir) ?: return SwitchRunStatus(
             ok = true,
             message = "Command succeeded, but the active provider could not be read to confirm it.",
         )
-        val activeId = ClaudeCodeRoute.matchProvider(route.baseUrl, _state.value.settings.providers)
+        val activeId = ClaudeCodeRoute.matchProvider(
+            route.baseUrl,
+            providersNow,
+            liveClaudeProviderId = accounts.liveProviderId,
+        )
 
         return if (activeId == target.id) {
             SwitchRunStatus(ok = true, message = "Swapped to ${target.resolvedDisplayName()}.")
