@@ -104,7 +104,7 @@ internal actual suspend fun launchClaudeLogin(configDir: String?): ClaudeLoginLa
  * failure — it has its own inheritance rules — so it falls back to a plain
  * create.
  */
-private fun createPrivateDir(dir: File): Boolean {
+internal fun createPrivateDir(dir: File): Boolean {
     val ownerOnly = runCatching {
         PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"))
     }.getOrNull()

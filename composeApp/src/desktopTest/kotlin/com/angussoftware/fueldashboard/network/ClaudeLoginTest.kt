@@ -1,5 +1,8 @@
 package com.angussoftware.fueldashboard.network
 
+import java.io.File
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -83,5 +86,33 @@ class ClaudeLoginTest {
         // the command to run instead.
         assertTrue(terminalCommands("Mac OS X").isEmpty())
         assertTrue(terminalCommands("Darwin").isEmpty())
+    }
+
+    @Test
+    fun aNewAccountDirectoryIsCreatedOwnerOnly() {
+        // It is about to hold a credentials file, and the prevailing umask
+        // (commonly 022) would otherwise leave it world-readable.
+        val parent = Files.createTempDirectory("claude-login").toFile()
+        try {
+            val dir = File(parent, "accounts/work")
+            assertTrue(createPrivateDir(dir))
+            assertTrue(dir.isDirectory)
+            assertEquals(
+                "rwx------",
+                PosixFilePermissions.toString(Files.getPosixFilePermissions(dir.toPath())),
+            )
+        } finally {
+            parent.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun anExistingDirectoryIsLeftAsItIs() {
+        val dir = Files.createTempDirectory("claude-login").toFile()
+        try {
+            assertTrue(createPrivateDir(dir), "an existing directory is success, not a failure")
+        } finally {
+            dir.deleteRecursively()
+        }
     }
 }

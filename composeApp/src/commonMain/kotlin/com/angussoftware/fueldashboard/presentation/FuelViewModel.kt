@@ -388,6 +388,13 @@ class FuelViewModel(
     private val routeReader: (String?) -> ClaudeCodeRoute? = { readClaudeCodeRoute(it) },
     /** Overridden in tests; production spawns the real process. */
     private val switchRunner: suspend (String) -> SwitchCommandResult = { runSwitchCommand(it) },
+    /**
+     * Overridden in tests; production opens a terminal running `claude /login`
+     * for the given config dir. Injected for the same reason as [switchRunner]:
+     * the real launcher opens a window, so without a seam the login flow's
+     * state handling could not be tested at all.
+     */
+    private val loginLauncher: suspend (String?) -> ClaudeLoginLaunch = { launchClaudeLogin(it) },
 ) {
 
     companion object {
@@ -1383,7 +1390,7 @@ class FuelViewModel(
             // Never let a launch failure escape: this is a button, and an
             // exception here would take the poll loop's scope with it.
             val result = runCatching {
-                launchClaudeLogin(config.claudeConfigDir.trim().ifBlank { null })
+                loginLauncher(config.claudeConfigDir.trim().ifBlank { null })
             }.getOrElse { e ->
                 ClaudeLoginLaunch(
                     launched = false,
@@ -1417,6 +1424,21 @@ class FuelViewModel(
             ) }
         }
     }
+
+    /**
+     * Which login status lines survive a refresh.
+     *
+     * Retired by evidence rather than time: a line stays until that account
+     * reports a usable reading, which is the only confirmation the login took.
+     * The OAuth flow takes as long as a person takes, so clearing on the next
+     * poll would wipe the line while they are still in the browser — and a
+     * failed launch stays too, since no poll makes "could not open a terminal"
+     * stale.
+     */
+    internal fun retainLoginResults(
+        results: Map<String, ClaudeLoginLaunch>,
+        reports: Map<String, ProviderReport>,
+    ): Map<String, ClaudeLoginLaunch> = results.filterKeys { id -> reports[id]?.available != true }
 
     /**
      * One reading of every configured Claude account: each registry, their sum,
@@ -1972,9 +1994,7 @@ class FuelViewModel(
             // that account actually reports a reading, which is the only thing
             // that confirms the login took. A failed launch stays put too —
             // nothing about a poll makes "could not open a terminal" stale.
-            loginResults = current.loginResults.filterKeys { id ->
-                reports[id]?.available != true
-            },
+            loginResults = retainLoginResults(current.loginResults, reports),
             providerErrors = errors,
             fuel = fuel,
             decisions = decisions,

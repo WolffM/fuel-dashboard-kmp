@@ -150,6 +150,15 @@ fun ProviderContent(
             )
         }
 
+        // Outcome of the last login, placed above every early return below.
+        // The card an operator logs in from is usually the one showing an
+        // error or still connecting — the states that return early — so down
+        // with the swap status it would never be seen when it matters.
+        if (loginStatus != null) {
+            Spacer(Modifier.height(4.dp))
+            ClaudeLoginStatus(loginStatus)
+        }
+
         if (error != null) {
             Spacer(Modifier.height(4.dp))
             Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)

@@ -996,7 +996,7 @@ private fun ProviderCodeExample(code: String) {
 }
 
 @Composable
-private fun ProviderConfigRow(
+internal fun ProviderConfigRow(
     config: ProviderConfig,
     onUpdate: (ProviderConfig) -> Unit,
     onRemove: () -> Unit,
@@ -1170,10 +1170,12 @@ private fun ProviderConfigRow(
                         label = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    if (config.kind == ProviderKind.CONNECTED_API) {
-                                        "Server API Key (optional)"
-                                    } else {
-                                        "API Key"
+                                    when (config.kind) {
+                                        ProviderKind.CONNECTED_API -> "Server API Key (optional)"
+                                        // Same wording as the add dialog: blank is
+                                        // valid and means the local login.
+                                        ProviderKind.CLAUDE_CODE -> "OAuth token (optional)"
+                                        else -> "API Key"
                                     },
                                 )
                                 if (showHelp) {
