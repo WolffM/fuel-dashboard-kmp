@@ -67,6 +67,7 @@ import com.angussoftware.fueldashboard.model.ProviderType
 import com.angussoftware.fueldashboard.model.ReportWindow
 import com.angussoftware.fueldashboard.model.SettingsSyncData
 import com.angussoftware.fueldashboard.network.canCheckJunieBalance
+import com.angussoftware.fueldashboard.network.claudeLoginSupported
 import com.angussoftware.fueldashboard.engine.switchCommandsSupported
 import com.angussoftware.fueldashboard.presentation.DashboardState
 import com.angussoftware.fueldashboard.presentation.FuelViewModel
@@ -659,6 +660,20 @@ internal fun FuelColumnContent(
                             },
                             rateLimitedUntil = state.rateLimitedUntil[config.id],
                             switchStatus = state.switchResults[config.id],
+                            isLoggingIn = config.id in state.loggingInProviderIds,
+                            // Only the plan provider has an account to log in
+                            // to, and only where a terminal exists to run the
+                            // interactive flow in. Everything else
+                            // authenticates with a key.
+                            onLogIn = if (
+                                claudeLoginSupported &&
+                                config.kind == com.angussoftware.fueldashboard.model.ProviderKind.CLAUDE_CODE
+                            ) {
+                                { viewModel.logInToClaudeAccount(config.id) }
+                            } else {
+                                null
+                            },
+                            loginStatus = state.loginResults[config.id],
                         )
                     }
                 }
@@ -720,6 +735,9 @@ private fun ProviderSection(
     onSwapAnyway: (() -> Unit)?,
     rateLimitedUntil: Long?,
     switchStatus: com.angussoftware.fueldashboard.presentation.SwitchRunStatus?,
+    isLoggingIn: Boolean = false,
+    onLogIn: (() -> Unit)? = null,
+    loginStatus: com.angussoftware.fueldashboard.network.ClaudeLoginLaunch? = null,
 ) {
     com.angussoftware.fueldashboard.ui.components.ProviderContent(
         config = config,
@@ -738,5 +756,8 @@ private fun ProviderSection(
         onSwapAnyway = onSwapAnyway,
         rateLimitedUntil = rateLimitedUntil,
         switchStatus = switchStatus,
+        isLoggingIn = isLoggingIn,
+        onLogIn = onLogIn,
+        loginStatus = loginStatus,
     )
 }

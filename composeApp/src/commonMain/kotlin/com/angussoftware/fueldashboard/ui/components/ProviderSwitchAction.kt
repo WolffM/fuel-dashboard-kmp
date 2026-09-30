@@ -14,6 +14,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
@@ -154,4 +155,96 @@ fun ProviderSwapStatus(
             }
         }
     }
+}
+
+/**
+ * "Log in" — opens an interactive Claude Code login for this account.
+ *
+ * Sits beside [ProviderSwapButton] because it belongs to the same family: an
+ * action on this one provider, inline with its name. It is the step the app
+ * cannot take on the operator's behalf, and the step that is easiest to get
+ * wrong by hand — logging a second subscription into the first one's directory
+ * overwrites a working login with no warning.
+ *
+ * Offered only where it can work: [onLogIn] is null on every platform without a
+ * terminal, and for every provider kind that has no account to log in to.
+ *
+ * Unlike the swap button this is never disabled. Re-authenticating an account
+ * that already works is a legitimate thing to want — a plan change, or a
+ * suspicion the token is wrong — and "you appear to be logged in" is not
+ * grounds for the app to refuse. The label carries the state instead, so the
+ * common case still reads as a repair rather than an invitation.
+ */
+@Composable
+fun ClaudeLoginButton(
+    isLoggingIn: Boolean,
+    /**
+     * True when this account currently has no usable reading, which is what
+     * an absent or expired token looks like from here.
+     *
+     * Only changes the wording. The app cannot distinguish "no credentials"
+     * from "the endpoint is down" without asking, and a button that disappears
+     * whenever a provider is merely unwell would be missing exactly when it was
+     * needed.
+     */
+    needsCredentials: Boolean,
+    onLogIn: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    if (onLogIn == null) return
+
+    if (isLoggingIn) {
+        Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(6.dp))
+            Text("Opening login…", style = MaterialTheme.typography.labelSmall)
+        }
+        return
+    }
+
+    // Same metrics and the same interactive-minimum opt-out as the swap
+    // button, so the two read as one control set rather than two strays. Tonal
+    // for the repair case and a plain text button otherwise: when the account
+    // is healthy this is a rarely-wanted action and should not compete with the
+    // gauge beside it.
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+        if (needsCredentials) {
+            FilledTonalButton(
+                onClick = onLogIn,
+                modifier = modifier.heightIn(min = 28.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+            ) {
+                Text("Log in", style = MaterialTheme.typography.labelSmall)
+            }
+        } else {
+            TextButton(
+                onClick = onLogIn,
+                modifier = modifier.heightIn(min = 28.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+            ) {
+                Text("Re-log in", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+/**
+ * What came of the last login launch.
+ *
+ * Never styled as an error even when the launch failed: the message in that
+ * case carries the command to run by hand, which is help rather than an alarm.
+ * A real failure the operator must act on shows up as the gauge staying empty.
+ */
+@Composable
+fun ClaudeLoginStatus(
+    status: com.angussoftware.fueldashboard.network.ClaudeLoginLaunch?,
+    modifier: Modifier = Modifier,
+) {
+    if (status == null) return
+    Text(
+        text = (if (status.launched) "→ " else "⚠ ") + status.message,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
+    )
 }
