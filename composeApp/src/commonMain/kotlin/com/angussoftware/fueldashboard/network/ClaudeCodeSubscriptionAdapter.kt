@@ -37,6 +37,15 @@ import kotlin.math.roundToInt
  * provider is re-read on every poll so a `/login` refresh is picked up
  * without restarting.
  *
+ * More than one account can be watched at once by giving each provider its own
+ * [configDir]. Note what that does NOT buy: only the account Claude Code is
+ * currently running as gets its access token refreshed, and those tokens live
+ * for hours while the refresh token lives for weeks. An account nothing is
+ * running under therefore goes unreadable on its own, and this adapter reports
+ * that as unknown rather than minting a token — which is correct, and is also
+ * why an idle account is never an automatic swap target (see `SwapTarget`).
+ * Keeping an idle account readable is a job for whatever owns the switch.
+ *
  * Desktop only. Android and iOS have no access to the credentials file, so
  * [poll] fails there with a clear message; mobile receives this gauge the
  * same way it receives every other one, through a Remote Dashboard.
@@ -53,8 +62,17 @@ class ClaudeCodeSubscriptionAdapter(
     override val providerId: String,
     private val baseUrl: String = "https://api.anthropic.com",
     customDisplayName: String? = null,
+    /**
+     * Which Claude Code configuration directory this account's credentials
+     * live in; null or blank means the default `~/.claude`.
+     *
+     * This is the whole reason two subscriptions can be watched at once. It is
+     * read on every poll rather than resolved once, so the account's token is
+     * picked up after a `/login` or a switch without restarting.
+     */
+    private val configDir: String? = null,
     /** Overridden in tests; production reads the local Claude Code credentials. */
-    private val tokenProvider: () -> String? = { readClaudeCodeOAuthToken() },
+    private val tokenProvider: () -> String? = { readClaudeCodeOAuthToken(configDir) },
 ) : ProviderAdapter {
 
     override val displayName: String = customDisplayName ?: "Claude Code"
@@ -218,9 +236,16 @@ internal fun failureFor(
  * The OAuth access token Claude Code stores on this machine, or null when it
  * cannot be read (not logged in, expired, or an unsupported platform).
  *
- * Implementations must never log the value or copy it anywhere on disk.
+ * [configDir] selects which account's credentials to read, or null for the
+ * default `~/.claude`.
+ *
+ * Implementations must never log the value or copy it anywhere on disk, and
+ * should read the file on each call rather than watch it: the read costs
+ * nothing next to the HTTP request it precedes, and a watcher would add a
+ * background thread and native resources to a process meant to run for days,
+ * for a file that changes a few times a day.
  */
-internal expect fun readClaudeCodeOAuthToken(): String?
+internal expect fun readClaudeCodeOAuthToken(configDir: String? = null): String?
 
 /** Why the token is unavailable, phrased for whichever platform this is. */
 internal expect val claudeCodeCredentialsUnavailableHint: String

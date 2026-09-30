@@ -996,7 +996,7 @@ private fun ProviderCodeExample(code: String) {
 }
 
 @Composable
-private fun ProviderConfigRow(
+internal fun ProviderConfigRow(
     config: ProviderConfig,
     onUpdate: (ProviderConfig) -> Unit,
     onRemove: () -> Unit,
@@ -1012,6 +1012,7 @@ private fun ProviderConfigRow(
         mutableStateOf(config.pollIntervalSeconds.toString())
     }
     var localActivateCommand by remember(config.id, isEditing) { mutableStateOf(config.activateCommand) }
+    var localClaudeConfigDir by remember(config.id, isEditing) { mutableStateOf(config.claudeConfigDir) }
     var localSwapAwayBelowPct by remember(config.id, isEditing) {
         mutableStateOf(config.swapAwayBelowPct.takeIf { it > 0 }?.toString().orEmpty())
     }
@@ -1252,6 +1253,43 @@ private fun ProviderConfigRow(
                     Spacer(Modifier.height(8.dp))
                 }
 
+                // Which Claude account this card watches. Only meaningful for
+                // the plan provider, and only on desktop, so it is not offered
+                // anywhere else. Left blank it is the default ~/.claude, which
+                // is what a single-subscription setup wants and what every
+                // existing provider already has.
+                if (config.kind == ProviderKind.CLAUDE_CODE) {
+                    OutlinedTextField(
+                        value = localClaudeConfigDir,
+                        onValueChange = { localClaudeConfigDir = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Claude config dir (optional)")
+                                if (showHelp) {
+                                    Spacer(Modifier.width(4.dp))
+                                    HelpIcon(
+                                        "The CLAUDE_CONFIG_DIR of the account this card watches. " +
+                                            "Leave blank for the default ~/.claude. Set it to watch a " +
+                                            "second subscription alongside the first — each account's " +
+                                            "token, sessions and routing are read from here.",
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        placeholder = {
+                            Text(
+                                "~/.claude",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+
                 PollIntervalSelector(
                     selectedSeconds = localPollInterval.toIntOrNull()?.coerceAtLeast(15) ?: 60,
                     onSelected = { localPollInterval = it.toString() },
@@ -1333,6 +1371,7 @@ private fun ProviderConfigRow(
                         localMonthlyBudgetUsd = config.monthlyBudgetUsd.takeIf { it > 0 }?.toString().orEmpty()
                         localPollInterval = config.pollIntervalSeconds.toString()
                         localActivateCommand = config.activateCommand
+                        localClaudeConfigDir = config.claudeConfigDir
                         localSwapAwayBelowPct = config.swapAwayBelowPct.takeIf { it > 0 }?.toString().orEmpty()
                         isEditing = false
                     }) {
@@ -1346,6 +1385,7 @@ private fun ProviderConfigRow(
                             monthlyBudgetUsd = localMonthlyBudgetUsd.toDoubleOrNull()?.takeIf { it > 0 } ?: 0.0,
                             pollIntervalSeconds = localPollInterval.toIntOrNull()?.coerceAtLeast(15) ?: 60,
                             activateCommand = localActivateCommand.trim(),
+                            claudeConfigDir = localClaudeConfigDir.trim(),
                             // Independent of each other now: the threshold says
                             // when to leave THIS provider, while the command says
                             // how to arrive at it. A threshold on a provider with

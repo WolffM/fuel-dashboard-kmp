@@ -32,13 +32,39 @@ data class ClaudeCodeFleet(
     val isQuiet: Boolean get() = total > 0 && busy == 0 && unknown == 0
 
     fun describe(): String = "busy=$busy idle=$idle unknown=$unknown"
+
+    /**
+     * Combines two accounts' registries into one fleet reading.
+     *
+     * Needed because one machine can now run Claude Code under several
+     * configuration directories, each with its own `sessions/`. The idle gate
+     * protects in-flight turns, and a turn is just as real whichever account
+     * it is billed to — so the gate has to see the whole machine, not the
+     * account being swapped away from. Summing is the only combination that
+     * preserves [isQuiet]'s meaning: busy anywhere is busy, and one
+     * unreadable registry keeps the whole fleet from reading quiet.
+     */
+    operator fun plus(other: ClaudeCodeFleet): ClaudeCodeFleet = ClaudeCodeFleet(
+        busy = busy + other.busy,
+        idle = idle + other.idle,
+        unknown = unknown + other.unknown,
+    )
 }
 
 /**
- * Reads the live-session registry.
+ * Reads the live-session registry for one Claude Code configuration directory.
  *
  * Returns null when the registry cannot be read at all — not installed, or an
  * unsupported platform — which the caller must treat as "unknown", never as
  * "quiet".
+ *
+ * [configDir] is the configuration directory to read, or null for the default
+ * `~/.claude`. It exists because `CLAUDE_CONFIG_DIR` gives each Claude account
+ * its own directory, and this registry lives inside it: reading only the
+ * default location would report an empty registry for every account running
+ * elsewhere. An empty registry is not quiet ([ClaudeCodeFleet.isQuiet] requires
+ * `total > 0`), so getting this wrong fails closed and refuses every swap
+ * rather than interrupting a live turn — but it does refuse them all, which is
+ * why each configured account must be read.
  */
-internal expect fun readClaudeCodeFleet(): ClaudeCodeFleet?
+internal expect fun readClaudeCodeFleet(configDir: String? = null): ClaudeCodeFleet?

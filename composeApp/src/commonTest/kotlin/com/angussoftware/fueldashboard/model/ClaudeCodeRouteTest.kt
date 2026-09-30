@@ -119,4 +119,86 @@ class ClaudeCodeRouteTest {
                 .permissionMode,
         )
     }
+
+    // --- Two subscriptions ------------------------------------------------
+    //
+    // Both accounts run against the same stock endpoint, so the host cannot
+    // tell them apart. These cover the tiebreak that replaced guessing by
+    // list order.
+
+    private val planA = ProviderConfig(id = "cc-a", kind = ProviderKind.CLAUDE_CODE)
+    private val planB = ProviderConfig(
+        id = "cc-b",
+        kind = ProviderKind.CLAUDE_CODE,
+        claudeConfigDir = "~/.claude-accounts/work",
+    )
+
+    @Test
+    fun twoPlansResolveToWhicheverIsActuallyLive() {
+        // The whole point: not the first in the list, the one the sensor named.
+        assertEquals(
+            "cc-b",
+            ClaudeCodeRoute.matchProvider(null, listOf(planA, planB), liveClaudeProviderId = "cc-b"),
+        )
+        assertEquals(
+            "cc-a",
+            ClaudeCodeRoute.matchProvider(null, listOf(planA, planB), liveClaudeProviderId = "cc-a"),
+        )
+    }
+
+    @Test
+    fun twoPlansWithNoLiveReadingMatchNothing() {
+        // Guessing here is what the tiebreak exists to avoid: naming one of
+        // two indistinguishable accounts would be right half the time, and it
+        // drives the IN USE badge and the Swap button's disabled state.
+        assertNull(ClaudeCodeRoute.matchProvider(null, listOf(planA, planB)))
+    }
+
+    @Test
+    fun twoPlansDoNotFallBackToAnApiProvider() {
+        // With plan providers configured, an API-platform provider is not a
+        // plausible stand-in — it cannot see plan utilization at all. Better to
+        // report unknown than to point at the wrong kind of gauge.
+        assertNull(ClaudeCodeRoute.matchProvider(null, listOf(planA, planB, anthropic)))
+    }
+
+    @Test
+    fun aStaleLiveIdIsIgnoredRatherThanTrusted() {
+        // The sensor reading and the provider list are read at slightly
+        // different times, so the named provider may since have been removed.
+        // A stale id must not outvote the single-plan fallback.
+        assertEquals(
+            "cc-a",
+            ClaudeCodeRoute.matchProvider(null, listOf(planA), liveClaudeProviderId = "cc-removed"),
+        )
+        assertNull(
+            ClaudeCodeRoute.matchProvider(
+                null,
+                listOf(planA, planB),
+                liveClaudeProviderId = "cc-removed",
+            ),
+        )
+    }
+
+    @Test
+    fun onePlanStillNeedsNoSensor() {
+        // Single-subscription installs must be unaffected: with one plan
+        // provider the answer is unambiguous without any live reading.
+        assertEquals("cc-a", ClaudeCodeRoute.matchProvider(null, listOf(zai, planA)))
+    }
+
+    @Test
+    fun anExplicitEndpointStillWinsOverTheLiveReading() {
+        // A configured ANTHROPIC_BASE_URL is a direct statement about where
+        // requests go. It is more specific than "which account is running", so
+        // it must not be overridden by the tiebreak.
+        assertEquals(
+            "zai-1",
+            ClaudeCodeRoute.matchProvider(
+                "https://api.z.ai/api/anthropic",
+                listOf(zai, planA, planB),
+                liveClaudeProviderId = "cc-a",
+            ),
+        )
+    }
 }

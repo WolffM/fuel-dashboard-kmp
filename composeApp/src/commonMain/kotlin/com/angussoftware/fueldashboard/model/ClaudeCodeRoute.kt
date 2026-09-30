@@ -72,7 +72,11 @@ data class ClaudeCodeRoute(
          * configured as `https://api.z.ai`. Comparing whole strings would
          * never match.
          */
-        fun matchProvider(baseUrl: String?, providers: List<ProviderConfig>): String? {
+        fun matchProvider(
+            baseUrl: String?,
+            providers: List<ProviderConfig>,
+            liveClaudeProviderId: String? = null,
+        ): String? {
             val host = baseUrl?.let { hostOf(it) }
             if (host == null) {
                 // No override means Claude Code is on Anthropic's own endpoint,
@@ -80,8 +84,30 @@ data class ClaudeCodeRoute(
                 // plan provider is the one serving. Without this the default
                 // (and most common) case matched nothing and the UI could not
                 // say which provider was live at all.
-                return providers.firstOrNull { it.kind == ProviderKind.CLAUDE_CODE }?.id
-                    ?: providers.firstOrNull { it.kind == ProviderKind.ANTHROPIC }?.id
+                //
+                // With two subscriptions configured this question stops having
+                // a single answer: BOTH accounts run against the same stock
+                // endpoint, so the host says nothing about which of them is
+                // serving. [liveClaudeProviderId] is the tiebreak, and it must
+                // come from a sensor rather than list order: it feeds the
+                // "IN USE" badge and the Swap button's disabled state, so a
+                // guess would point the operator at the wrong tank.
+                //
+                // Only trusted when it names a provider that is actually still
+                // configured, so a stale id from a removed provider cannot
+                // outvote the fallback.
+                liveClaudeProviderId
+                    ?.takeIf { id -> providers.any { it.id == id } }
+                    ?.let { return it }
+
+                val claudeProviders = providers.filter { it.kind == ProviderKind.CLAUDE_CODE }
+                // Exactly one plan provider makes list order unambiguous. More
+                // than one with no sensor reading is genuinely unknown, and
+                // unknown is reported as such — guessing here is what the
+                // tiebreak above exists to avoid.
+                claudeProviders.singleOrNull()?.let { return it.id }
+                if (claudeProviders.isNotEmpty()) return null
+                return providers.firstOrNull { it.kind == ProviderKind.ANTHROPIC }?.id
             }
             return providers.firstOrNull { hostOf(it.resolvedServerUrl()) == host }?.id
         }

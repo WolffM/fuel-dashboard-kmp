@@ -5,7 +5,7 @@ package com.angussoftware.fueldashboard.network
  * here. The plan gauge reaches this device the same way every other provider's
  * does: through a Remote Dashboard pointed at the desktop app.
  */
-internal actual fun readClaudeCodeOAuthToken(): String? = null
+internal actual fun readClaudeCodeOAuthToken(configDir: String?): String? = null
 
 internal actual val claudeCodeCredentialsUnavailableHint: String =
     "Claude Code plan usage is read on the desktop dashboard — " +

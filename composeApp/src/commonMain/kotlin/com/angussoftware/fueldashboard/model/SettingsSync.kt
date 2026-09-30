@@ -92,10 +92,13 @@ data class SettingsSyncData(
             junieLicense: String? = null,
             junieLastChecked: Long? = null,
         ): SettingsSyncData = SettingsSyncData(
-            // Switch commands never leave this machine: they are local,
-            // privileged and machine-specific. The receiver strips them too —
+            // Switch commands and Claude account directories never leave this
+            // machine: they are local and machine-specific, and a directory
+            // path also names this user's home. The receiver strips both too —
             // this is the belt to that braces.
-            providers = settings.providers.map { it.copy(activateCommand = "", swapAwayBelowPct = 0) },
+            providers = settings.providers.map {
+                it.copy(activateCommand = "", swapAwayBelowPct = 0, claudeConfigDir = "")
+            },
             themeMode = themeController.themeMode.name,
             lightColorTheme = themeController.lightColorTheme.name,
             darkColorTheme = themeController.darkColorTheme.name,
