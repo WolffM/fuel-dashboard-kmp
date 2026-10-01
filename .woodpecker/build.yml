@@ -29,17 +29,40 @@ steps:
       # from the base image, the native lib dies with ExceptionInInitializerError
       - apt-get update -qq >/dev/null && apt-get install -y -qq libgl1 libx11-6 >/dev/null
       - mkdir -p ~/.gradle
-      # set +x/-x brackets: xtrace would print expanded secret values to logs
-      # (fleet-wide step-log exposure fix, Sep 26 — see fleet-shared/knowledge/access-matrix.md)
-      - set +x
-      - echo "forgejo.token=${FORGEJO_TOKEN}" >> ~/.gradle/gradle.properties
-      - set -x
+      # Leak-proof pattern (post-#287, fleet-shared/knowledge/step-log-secret-exposure.md):
+      # Woodpecker's script-generator wrapper echoes expanded command text
+      # regardless of set +x brackets, so the token is NEVER referenced in
+      # shell command text. It rides via step-level from_secret env and is
+      # consumed ONLY inside this Node script via process.env (ci-theming
+      # ships Node 22 and no python3 — hence the Node writer).
+      - |
+        cat > /tmp/write-gradle-props.mjs << 'NODEEOF'
+        import { appendFileSync, chmodSync, existsSync, mkdirSync } from 'node:fs'
+        import { join } from 'node:path'
+        import { homedir } from 'node:os'
+        const TOKEN = process.env.FORGEJO_TOKEN
+        if (!TOKEN) {
+          console.error('FATAL: missing required env: FORGEJO_TOKEN')
+          process.exit(1)
+        }
+        const gradleDir = process.env.GRADLE_USER_HOME || join(homedir(), '.gradle')
+        mkdirSync(gradleDir, { recursive: true })
+        const path = join(gradleDir, 'gradle.properties')
+        if (!existsSync(path)) {
+          appendFileSync(path, 'forgejo.token=' + TOKEN + '\n')
+          chmodSync(path, 0o600)
+        }
+        console.log('gradle.properties written (1 credential, value not logged)')
+        NODEEOF
+        node /tmp/write-gradle-props.mjs
       - mkdir -p /tmp/android-sdk
       - echo "sdk.dir=/tmp/android-sdk" > local.properties
       - chmod +x gradlew
       - ./gradlew --no-daemon :composeApp:compileKotlinDesktop :composeApp:desktopTest
     environment:
       GRADLE_USER_HOME: /root/.gradle
+      FORGEJO_TOKEN:
+        from_secret: FORGEJO_TOKEN
     volumes:
       - gradle-cache-fuel-dashboard:/root/.gradle/caches
       - gradle-wrapper-fuel-dashboard:/root/.gradle/wrapper

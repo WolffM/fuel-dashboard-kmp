@@ -1,0 +1,222 @@
+# Google Play release channel for the Android target (com.angussoftware.fueldashboard).
+# Tag-triggered: Coda tags v* after review+merge; the pipeline builds the
+# signed AAB and uploads it to the Play alpha track.
+#
+# Repos are private on Forgejo — server-side netrc injection does not work
+# with this setup, so clone auth is explicit: CI_NETRC_* env in the clone
+# step, sourced from the repo-level FUEL_CLONE_TOKEN secret.
+#
+# NOTE: the repo-level FORGE_CLONE_TOKEN secret (push/PR/manual scope only)
+# shadows the same-named global secret on from_secret lookups, so this
+# workflow uses a dedicated FUEL_CLONE_TOKEN secret with tag scope.
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    environment:
+      CI_NETRC_MACHINE: git.angussoftware.dev
+      CI_NETRC_USERNAME: coda
+      CI_NETRC_PASSWORD:
+        from_secret: FUEL_CLONE_TOKEN
+
+when:
+  - event: tag
+    ref: refs/tags/v*
+  - event: manual
+
+steps:
+  release:
+    image: localhost:5000/ci-theming-emulator:latest
+    environment:
+      ANDROID_HOME: /opt/android-sdk
+      # Forgejo Maven token — consumed ONLY inside Python via os.environ
+      # (write-gradle-props.py below); never referenced in shell command
+      # text (post-#287 leak-proofing).
+      FORGEJO_TOKEN:
+        from_secret: FORGEJO_TOKEN
+      # Release keystore (base64) + password — consumed ONLY inside
+      # Python via os.environ (signing-setup.py below).
+      FUEL_KEYSTORE_B64:
+        from_secret: FUEL_KEYSTORE_B64
+      FUEL_KEYSTORE_PASSWORD:
+        from_secret: FUEL_KEYSTORE_PASSWORD
+      # Play upload SA — consumed ONLY via os.environ inside upload-play.py.
+      FUEL_PLAY_SA_B64:
+        from_secret: FUEL_PLAY_SA_B64
+      PLAY_PACKAGE: com.angussoftware.fueldashboard
+      # PLAY_TRACK: alpha holds versionCode 6 (current); uploads land on the
+      # alpha track. PLAY_ROLLOUT_FRACTION: change to e.g. 0.1 for a 10%
+      # inProgress rollout; 1.0 = full completed release.
+      PLAY_TRACK: alpha
+      PLAY_ROLLOUT_FRACTION: "1.0"
+    commands:
+      - mkdir -p ~/.gradle
+      # Leak-proof pattern (fleet-shared/knowledge/step-log-secret-exposure.md):
+      # Woodpecker's script-generator wrapper echoes expanded command text
+      # regardless of set +x brackets (#287), so secrets NEVER appear in
+      # shell command text — they ride via step-level from_secret env and
+      # are consumed only inside scripts via os.environ/process.env.
+      - |
+        cat > /tmp/write-gradle-props.py << 'PYEOF'
+        import os, sys
+        CREDS = {
+            'forgejo.token': 'FORGEJO_TOKEN',
+        }
+        missing = [env for env in CREDS.values() if not os.environ.get(env)]
+        if missing:
+            print('FATAL: missing required env: ' + ', '.join(missing), file=sys.stderr)
+            sys.exit(1)
+        gradle_dir = os.environ.get('GRADLE_USER_HOME') or os.path.join(os.path.expanduser('~'), '.gradle')
+        os.makedirs(gradle_dir, exist_ok=True)
+        path = os.path.join(gradle_dir, 'gradle.properties')
+        with open(path, 'w') as f:
+            for prop, env in CREDS.items():
+                f.write(prop + '=' + os.environ[env] + '\n')
+        os.chmod(path, 0o600)
+        print('gradle.properties written (1 credential, values not logged)')
+        PYEOF
+        python3 /tmp/write-gradle-props.py
+      # Install Android SDK (cached via volume) — compileSdk 37 / AGP 9.3.2
+      # needs platforms;android-37.0 + build-tools;37.0.0 (same set the dev
+      # machine uses for signed local AAB builds).
+      - |
+        if [ ! -d "$ANDROID_HOME/cmdline-tools/latest" ]; then
+          apt-get update > /dev/null 2>&1 && apt-get install -y wget unzip > /dev/null 2>&1
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O /tmp/cmdline-tools.zip
+          unzip -q /tmp/cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
+          mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+        else
+          echo "cmdline-tools cached, skipping install"
+        fi
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "platform-tools" > /dev/null 2>&1
+        echo "sdk.dir=$ANDROID_HOME" > local.properties
+      # Clean stale Gradle locks from cached volumes (journal-1 lock
+      # collisions under concurrent pipelines)
+      - rm -rf ~/.gradle/caches/journal-1 ~/.gradle/caches/*.lock
+      # Signing setup — leak-proof (post-#287): keystore B64 and password
+      # consumed ONLY inside Python via os.environ; zero secret references
+      # in shell command text. The script writes android-signing.properties
+      # (the format composeApp/build.gradle.kts already reads) with mode 600.
+      - |
+        cat > /tmp/signing-setup.py << 'PYEOF'
+        import base64, os, sys
+        REQUIRED = ['FUEL_KEYSTORE_B64', 'FUEL_KEYSTORE_PASSWORD']
+        missing = [k for k in REQUIRED if not os.environ.get(k)]
+        if missing:
+            print('FATAL: missing signing env: ' + ', '.join(missing), file=sys.stderr)
+            sys.exit(1)
+        with open('/tmp/keystore.jks', 'wb') as f:
+            f.write(base64.b64decode(os.environ['FUEL_KEYSTORE_B64']))
+        os.chmod('/tmp/keystore.jks', 0o600)
+        with open('android-signing.properties', 'w') as f:
+            f.write('storeFile=/tmp/keystore.jks\n')
+            f.write('storePassword=%s\n' % os.environ['FUEL_KEYSTORE_PASSWORD'])
+            f.write('keyAlias=fuel-dashboard\n')
+            f.write('keyPassword=%s\n' % os.environ['FUEL_KEYSTORE_PASSWORD'])
+        os.chmod('android-signing.properties', 0o600)
+        print('keystore + android-signing.properties ready (values not logged)')
+        PYEOF
+        python3 /tmp/signing-setup.py
+      # Build signed release AAB. versionName comes from the `version`
+      # gradle property, versionCode from `android.versionCode` — both in
+      # gradle.properties (bumped in the release PR, no tag parsing).
+      - chmod +x gradlew
+      - ./gradlew --no-daemon :composeApp:bundleRelease
+      # Find AAB — FATAL if missing (a red release pipeline beats shipping
+      # nothing behind a green one).
+      - |
+        set -e
+        AAB_PATH=$(find composeApp/build/outputs/bundle/release/ -name "*.aab" | head -1)
+        if [ -z "$AAB_PATH" ]; then
+          echo "FATAL: No AAB found after bundleRelease — build output problem"
+          ls -la composeApp/build/outputs/bundle/release/ || true
+          exit 1
+        fi
+        if echo "$AAB_PATH" | grep -q "unsigned"; then
+          echo "FATAL: AAB is unsigned — signing setup failed"
+          exit 1
+        fi
+        echo "AAB found: $AAB_PATH (size=$(wc -c < "$AAB_PATH") bytes)"
+      # Upload AAB to Google Play — FATAL on failure or skip (AngusSoftwareApp
+      # lesson: non-fatal handling masked a 403 wrong-key upload for ~10 days
+      # behind a green pipeline).
+      #
+      # Leak-proofing (post-#287): the SA JSON NEVER appears in shell command
+      # text — not even a [ -z ] guard, which expands the secret in command
+      # text that the wrapper echoes to logs. The presence check + FATAL exit
+      # live inside upload-play.py via os.environ.
+      - |
+        set -e
+        AAB_PATH=$(find composeApp/build/outputs/bundle/release/ -name "*.aab" | head -1)
+        export AAB_PATH
+        echo "Uploading AAB to Google Play Store (track=$PLAY_TRACK, rollout=$PLAY_ROLLOUT_FRACTION)..."
+        pip3 install --quiet --break-system-packages PyJWT cryptography requests 2>&1
+        cat > /tmp/upload-play.py << 'PYEOF'
+        import base64, json, os, sys
+        from datetime import datetime, timedelta
+        import jwt, requests
+        # SA JSON decoded in-memory from step env — never written by shell,
+        # never present in any logged command text.
+        SA_B64 = os.environ.get('FUEL_PLAY_SA_B64', '')
+        if not SA_B64:
+            print('FATAL: FUEL_PLAY_SA_B64 not set — Play upload secret missing (Woodpecker DB restore?)', file=sys.stderr)
+            sys.exit(1)
+        KEY_FILE = json.loads(base64.b64decode(SA_B64))
+        PACKAGE = os.environ.get('PLAY_PACKAGE', 'com.angussoftware.fueldashboard')
+        AAB_PATH = os.environ['AAB_PATH']
+        TRACK = os.environ.get('PLAY_TRACK', 'alpha')
+        FRACTION = float(os.environ.get('PLAY_ROLLOUT_FRACTION', '1.0'))
+        TIMEOUT = 300
+        def check(r):
+            if not r.ok:
+                print(f'FAILED: {r.status_code}: {r.text}', file=sys.stderr)
+                sys.exit(1)
+        print('obtaining access token...')
+        now = datetime.now()
+        claim = {'iss': KEY_FILE['client_email'], 'scope': 'https://www.googleapis.com/auth/androidpublisher', 'aud': 'https://oauth2.googleapis.com/token', 'exp': str(int((now + timedelta(minutes=10)).timestamp())), 'iat': str(int(now.timestamp()))}
+        assertion = jwt.encode(payload=claim, key=KEY_FILE['private_key'].encode(), algorithm='RS256', headers={'alg': 'RS256', 'typ': 'JWT'})
+        r = requests.post('https://oauth2.googleapis.com/token', data={'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer', 'assertion': assertion}, timeout=TIMEOUT)
+        check(r)
+        token = r.json()['access_token']
+        hdrs = {'Authorization': f'Bearer {token}'}
+        print('creating edit...')
+        r = requests.post(f'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{PACKAGE}/edits', json={'expiryTimeSeconds': str(int((now + timedelta(minutes=10)).timestamp()))}, headers=hdrs, timeout=TIMEOUT)
+        check(r)
+        edit_id = r.json()['id']
+        print(f'edit_id={edit_id}')
+        print('uploading aab...')
+        with open(AAB_PATH, 'rb') as f:
+            r = requests.post(f'https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/{PACKAGE}/edits/{edit_id}/bundles', data=f.read(), headers={**hdrs, 'Content-Type': 'application/octet-stream'}, timeout=TIMEOUT)
+        check(r)
+        vc = r.json()['versionCode']
+        print(f'uploaded version_code={vc}')
+        # Staged-rollout-capable: fraction 1.0 -> completed; 0 < f < 1 -> inProgress
+        release = {'versionCodes': [str(vc)]}
+        tag = os.environ.get('CI_COMMIT_TAG', '')
+        if tag:
+            release['name'] = tag
+        if FRACTION >= 1.0:
+            release['status'] = 'completed'
+        elif FRACTION <= 0:
+            print('FATAL: PLAY_ROLLOUT_FRACTION must be in (0, 1]', file=sys.stderr)
+            sys.exit(1)
+        else:
+            release['status'] = 'inProgress'
+            release['userFraction'] = {'fraction': FRACTION}
+        print(f'assigning to {TRACK} track (status={release["status"]})...')
+        r = requests.put(f'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{PACKAGE}/edits/{edit_id}/tracks/{TRACK}', json={'releases': [release]}, headers={**hdrs, 'Content-Type': 'application/json'}, timeout=TIMEOUT)
+        check(r)
+        print(f'assigned to {TRACK}')
+        print('committing edit...')
+        r = requests.post(f'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{PACKAGE}/edits/{edit_id}:commit', headers=hdrs, timeout=TIMEOUT)
+        check(r)
+        print(f'done - published {vc} to {TRACK} (fraction={FRACTION})')
+        PYEOF
+        python3 /tmp/upload-play.py
+        echo "Play Store upload and publish successful"
+        # Cleanup
+        rm -f /tmp/upload-play.py /tmp/keystore.jks /tmp/signing-setup.py /tmp/write-gradle-props.py
+    volumes:
+      - gradle-cache-fuel-release:/root/.gradle/caches
+      - gradle-wrapper-fuel-release:/root/.gradle/wrapper
+      - android-sdk-fuel-release:/opt/android-sdk
