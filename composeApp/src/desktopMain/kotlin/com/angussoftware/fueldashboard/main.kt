@@ -123,7 +123,7 @@ private fun runGui() = application {
             embeddedServer.stop()
             exitApplication()
         },
-        title = "Fuel Dashboard",
+        title = "Agents Fuel",
         icon = appIcon(),
         state = windowState,
     ) {

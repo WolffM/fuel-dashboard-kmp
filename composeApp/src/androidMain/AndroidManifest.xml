@@ -10,7 +10,7 @@
 
     <application
         android:name=".FuelDashboardApplication"
-        android:label="Fuel Dashboard"
+        android:label="Agents Fuel"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"

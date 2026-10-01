@@ -2,27 +2,36 @@
 
 ## App name (30 chars max)
 
-Fuel Dashboard
+Agents Fuel: AI Usage Tracking
+
+(Exactly 30 characters. Fallback variants if rejected: "Agents Fuel" (11), "Agents Fuel — AI Usage" (22), "Agents Fuel: Usage Tracking" (27).)
 
 ## Short description (80 chars max)
 
-Monitor AI provider quota and fuel levels across your fleet.
+Track AI usage and provider quota levels across all your agents, in one place.
 
 ## Long description (4000 chars max)
 
-Fuel Dashboard is a cross-platform desktop and mobile app for monitoring your
-AI provider fuel, quota, and budget status — all in one place.
+Agents Fuel is a cross-platform dashboard for tracking AI usage across your
+agents, models, and providers — quota, spend, and burn rate, all in one place.
 
-**Local-first.** Your API keys never leave your device. No telemetry, no
-analytics, no accounts required. The app talks directly to your providers.
+**Built for the AI era.** If you juggle LLM API keys, agent fleets, and
+subscription quotas, Agents Fuel gives you a live picture of who is consuming
+what — per agent, per model, per provider — so you never run dry mid-task.
+
+**Local-first. Your keys never leave your device.** No telemetry, no
+analytics, no account required. The app talks directly to your providers.
 
 **Multi-provider support.** Track quota and spending across z.ai, Letta Cloud,
 OpenAI, Anthropic, DeepSeek, Groq, Mistral, and Junie — all from a single
 dashboard. Each provider shows its fuel level, burn rate, and reset time.
 
-**Embedded orchestrator.** The dashboard includes a decision engine that
-recommends models across providers based on your current fuel state and tier
-preferences.
+**Usage metering.** Optionally connect your Letta API key for per-run token
+attribution — which agents and models are consuming your fuel, and when.
+
+**Embedded advisor.** A decision engine recommends models across providers
+based on your current fuel state and tier preferences, so you route work to
+the quota that can absorb it.
 
 **QR sync.** Pair your phone with your desktop by scanning a QR code —
 providers and settings transfer instantly. No cloud account needed.
@@ -30,11 +39,9 @@ providers and settings transfer instantly. No cloud account needed.
 **17 themes.** Built with the Angus Software Theming library, the app ships
 with 17 community color schemes and follows your system dark/light mode.
 
-**MCP server.** The desktop app exposes an MCP (Model Context Protocol) server,
-allowing AI agents to query fuel state and register themselves as providers.
-
-**Usage metering.** Optionally connect your Letta API key to see per-run token
-attribution — which agents and models are consuming your fuel, and when.
+**MCP server.** The desktop app exposes an MCP (Model Context Protocol)
+server, allowing AI agents to query fuel state and register themselves as
+providers.
 
 **Open source.** Licensed under Apache 2.0. Source code available at
 github.com/coda-rho-bot/fuel-dashboard-kmp.
@@ -78,28 +85,3 @@ All answers: **No data collected**
 - Contains gambling: No
 
 Rating: **Everyone**
-
-## Category
-
-Productivity
-
-## Content rating
-
-Everyone
-
-## Privacy policy URL
-
-https://docs.angussoftware.dev/fuel-dashboard/privacy-policy
-
-## App type
-
-App
-
-## Target audience
-
-The app is intended for developers and teams using AI APIs who want to
-monitor their quota and spending. Target audience is adults (18+).
-
-## News app
-
-No

@@ -130,7 +130,7 @@ fun FuelDashboardApp(
                 TopAppBar(
                     title = {
                         Text(
-                            if (showSettings) "Settings" else "Fuel Dashboard",
+                            if (showSettings) "Settings" else "Agents Fuel",
                             style = if (isCompact) {
                                 MaterialTheme.typography.titleSmall
                             } else {
