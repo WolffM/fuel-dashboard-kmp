@@ -1,6 +1,8 @@
 package com.angussoftware.fueldashboard.model
 
 import com.angussoftware.fueldashboard.settings.FuelSettingsKeys
+import com.angussoftware.fueldashboard.settings.AgentSettingsStore
+import com.angussoftware.fueldashboard.settings.FuelSettingsStore
 import com.angussoftware.fueldashboard.settings.ThemeController
 import com.angussoftware.fueldashboard.settings.UsageSourcesStore
 import com.angussoftware.fueldashboard.settings.loadStringSetting
@@ -124,6 +126,28 @@ data class SettingsSyncData(
             showAdvisor = loadStringSetting(FuelSettingsKeys.SHOW_ADVISOR, "").ifBlank { null }?.toBoolean(),
             feedbackUrl = loadStringSetting(FuelSettingsKeys.FEEDBACK_URL, "").takeIf { it.isNotBlank() },
             feedbackRepo = loadStringSetting(FuelSettingsKeys.FEEDBACK_REPO, "").takeIf { it.isNotBlank() },
+        )
+
+        /**
+         * Snapshot of THIS instance's current settings — the single
+         * construction path for every cross-device payload (GET /sync,
+         * MCP get_sync_data, one-time pairing redemption). Endpoints must
+         * not hand-build payloads: drift here means the same settings
+         * serialize differently per endpoint, and receivers cannot tell
+         * a stale builder from a real config difference.
+         *
+         * QR export paths may still call [from] directly where they pass
+         * UI-state values rather than the persisted store.
+         */
+        fun current(serverUrl: String? = null, serverApiKey: String? = null): SettingsSyncData = from(
+            settings = FuelSettingsStore.loadMultiProvider(),
+            agentSettings = AgentSettingsStore.load(),
+            themeController = ThemeController,
+            serverUrl = serverUrl,
+            serverApiKey = serverApiKey,
+            junieBalance = loadStringSetting(FuelSettingsKeys.JUNIE_BALANCE, "").toDoubleOrNull(),
+            junieLicense = loadStringSetting(FuelSettingsKeys.JUNIE_LICENSE, "").ifBlank { null },
+            junieLastChecked = loadStringSetting(FuelSettingsKeys.JUNIE_LAST_CHECKED, "").toLongOrNull(),
         )
 
         /**

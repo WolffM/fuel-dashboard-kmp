@@ -1,16 +1,28 @@
 package com.angussoftware.fueldashboard
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.angussoftware.fueldashboard.database.DatabaseDriverFactory
 import com.angussoftware.fueldashboard.database.FuelSnapshotRepository
+import com.angussoftware.fueldashboard.model.PairingClient
+import com.angussoftware.fueldashboard.model.PairingFetchResult
+import com.angussoftware.fueldashboard.model.PairingLink
 import com.angussoftware.fueldashboard.presentation.FuelProjection
 import com.angussoftware.fueldashboard.presentation.FuelViewModel
 import com.angussoftware.fueldashboard.presentation.ModelDrainRateDisplay
@@ -23,10 +35,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* granted or not — toggle reflects reality */ }
+
+    // Pending plain-HTTP LAN pairing link awaiting the user's consent tap.
+    // Compose state (not a plain field) so the dialog recomposes on set.
+    private var pendingConsentLink by mutableStateOf<PairingLink?>(null)
+
+    private val pairingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,6 +53,11 @@ class MainActivity : ComponentActivity() {
         // Wire fuel snapshot callbacks so the Android app shows fuel bars,
         // burn rates, and projections — same as desktop main.kt.
         wireFuelCallbacks()
+
+        // Headless pairing deep link (fueldashboard://import?...). Runs
+        // before setContent so a consent-required link renders its dialog
+        // on the first frame instead of flashing an empty dashboard first.
+        handlePairingIntent(intent)
 
         // Persistent status notification needs POST_NOTIFICATIONS on 13+.
         if (Build.VERSION.SDK_INT >= 33) {
@@ -54,6 +78,74 @@ class MainActivity : ComponentActivity() {
                     viewModel = viewModel,
                     themeController = themeController,
                 )
+
+                // Pairing consent (fleet SSOT: a plain-HTTP fetch to another
+                // device needs one explicit user tap; HTTPS and loopback
+                // fetch directly).
+                pendingConsentLink?.let { link ->
+                    PairingConsentDialog(
+                        url = link.url,
+                        onConfirm = {
+                            pendingConsentLink = null
+                            startPairingFetch(link)
+                        },
+                        onDismiss = { pendingConsentLink = null },
+                    )
+                }
+            }
+        }
+    }
+
+    // ── Headless pairing (fueldashboard://import deep link) ────────────
+    //
+    // MainActivity has no launchMode override (standard): every link
+    // arrival creates a fresh instance and runs onCreate, so handling the
+    // intent there is sufficient — there is no onNewIntent path.
+
+    private fun handlePairingIntent(intent: Intent?) {
+        val data = intent?.dataString ?: return // launcher/other — no link
+        val link = PairingLink.parse(data)
+        if (link == null) {
+            // Our scheme (manifest filter) but missing token/url — never fetch.
+            Toast.makeText(this, "Invalid pairing link", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (link.requiresLanConsent()) {
+            pendingConsentLink = link
+        } else {
+            startPairingFetch(link)
+        }
+    }
+
+    private fun startPairingFetch(link: PairingLink) {
+        pairingScope.launch {
+            val result = PairingClient.fetchAndApply(link) { syncData ->
+                // Apply on the main thread like every other UI-state write;
+                // importSyncedSettings is the same path QR/text-code sync uses.
+                withContext(Dispatchers.Main) {
+                    FuelViewModel.shared.importSyncedSettings(syncData)
+                }
+            }
+            withContext(Dispatchers.Main) {
+                when (result) {
+                    is PairingFetchResult.Success -> {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Settings synced from dashboard",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        if (link.autostart) FuelViewModel.shared.refreshNow()
+                    }
+                    // Expired/used tokens and unreachable servers read the
+                    // same to the user: the one-shot window is gone (spec).
+                    is PairingFetchResult.Expired,
+                    is PairingFetchResult.NetworkError,
+                    -> Toast.makeText(
+                        this@MainActivity,
+                        "Pairing link expired — try again",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
         }
     }
@@ -184,4 +276,29 @@ class MainActivity : ComponentActivity() {
             FuelStatusWorker.cancel(this)
         }
     }
+}
+
+@Composable
+private fun PairingConsentDialog(
+    url: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sync over local network?") },
+        text = {
+            Text(
+                "A pairing request arrived over the local network:\n\n$url\n\n" +
+                    "This transfers your dashboard settings, including provider API " +
+                    "keys, from that server to this device over plain HTTP.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Sync") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }

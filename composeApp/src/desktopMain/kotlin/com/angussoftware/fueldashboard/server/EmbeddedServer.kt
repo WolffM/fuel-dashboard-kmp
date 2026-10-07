@@ -24,6 +24,7 @@ import com.angussoftware.fueldashboard.settings.loadStringSetting
 import com.angussoftware.fueldashboard.ui.components.AcpAgentDisplay
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -36,7 +37,9 @@ import io.ktor.server.engine.EmbeddedServer as KtorServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.cors.routing.CORS
+import io.ktor.server.plugins.origin
 import io.ktor.server.request.path
+import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receive
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
@@ -54,6 +57,7 @@ import kotlinx.serialization.json.put
 import java.net.NetworkInterface
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -80,11 +84,18 @@ class EmbeddedServer(
     private val enableMcp: Boolean = true,
     /** Override Junie balance data (for tests). Defaults to reading from persisted settings. */
     private val junieBalanceProvider: () -> JunieBalanceData? = Companion::defaultJunieBalanceData,
+    /** One-time pairing-token TTL (for tests; spec default 60s). */
+    internal val pairTokenTtlMs: Long = PAIR_TOKEN_TTL_MS,
 ) {
     companion object {
         const val DEFAULT_PORT = 8322
         /** Bind to all interfaces so LAN devices can reach the server. */
         const val DEFAULT_HOST = "0.0.0.0"
+        /** One-time pairing-token TTL — tokens may appear in agent transcripts
+         *  (fleet SSOT: agent-app-bridge-pattern.md), so they die fast. */
+        const val PAIR_TOKEN_TTL_MS = 60_000L
+        /** Max outstanding pairing tokens — oldest evicted beyond this. */
+        const val MAX_PAIRING_TOKENS = 5
         private const val GRACE_PERIOD_MS = 500L
         private const val TIMEOUT_MS = 1_000L
 
@@ -123,6 +134,8 @@ class EmbeddedServer(
     /** Thread-safe registry of agents that self-registered via POST /agents/register or MCP register_agent. */
     internal val registeredAgents = ConcurrentHashMap<String, RegisteredAgent>()
     internal val agentIdCounter = AtomicLong(0)
+    /** One-time pairing tokens — single-use, short-TTL, in-memory only. */
+    private val pairingTokens = ConcurrentHashMap<String, PairingToken>()
 
     init {
         // Load persisted agents from SQLite on startup
@@ -231,7 +244,11 @@ class EmbeddedServer(
         // CORS preflight (OPTIONS) requests are handled earlier in the pipeline and
         // never reach this intercept.
         intercept(ApplicationCallPipeline.Call) {
-            if (call.request.path() == "/health") return@intercept
+            val path = call.request.path()
+            if (path == "/health") return@intercept
+            // GET /pair/{token} authenticates with the one-time token itself —
+            // exempt from the server-key intercept (POST /pair still requires it).
+            if (call.request.httpMethod == HttpMethod.Get && path.startsWith("/pair/")) return@intercept
             if (!call.requireApiKey()) {
                 finish()
             }
@@ -262,7 +279,7 @@ class EmbeddedServer(
 
         routing {
             get("/") {
-                call.respond(ServiceInfo("fuel-dashboard", "2.0", listOf("GET /fuel", "GET /decisions", "GET /agents", "GET /alerts", "GET /sync", "POST /sync", "GET /dashboard", "GET /v1/usage", "POST /v1/usage (universal usage ingestion)", "GET /health (no auth)", "POST /agents/register", "POST /agents/{id}/state", "DELETE /agents/{id}", "POST /mcp (MCP Streamable HTTP)")))
+                call.respond(ServiceInfo("fuel-dashboard", "2.0", listOf("GET /fuel", "GET /decisions", "GET /agents", "GET /alerts", "GET /sync", "POST /sync", "GET /dashboard", "GET /v1/usage", "POST /v1/usage (universal usage ingestion)", "GET /health (no auth)", "POST /agents/register", "POST /agents/{id}/state", "DELETE /agents/{id}", "POST /pair (one-time pairing token)", "GET /pair/{token} (one-time settings redemption)", "POST /mcp (MCP Streamable HTTP)")))
             }
 
             get("/fuel") {
@@ -369,28 +386,11 @@ class EmbeddedServer(
             // Sync endpoint — returns base64 sync code for cross-device setup
             get("/sync") {
                 if (!call.requireApiKey()) return@get
-                val settings = FuelSettingsStore.loadMultiProvider()
-                val agentSettings = AgentSettingsStore.load()
-                // Canonical builder: real theme, junie, section orders,
-                // usage sources, prefs. Hand-building this (the old way)
-                // hardcoded theme defaults — importing such a code silently
-                // reset the receiver's theme.
-                val syncData = SettingsSyncData.from(
-                    settings = settings,
-                    agentSettings = agentSettings,
-                    themeController = com.angussoftware.fueldashboard.settings.ThemeController,
-                    serverUrl = serverUrl,
-                    serverApiKey = apiKey,
-                    junieBalance = com.angussoftware.fueldashboard.settings.loadStringSetting(
-                        com.angussoftware.fueldashboard.settings.FuelSettingsKeys.JUNIE_BALANCE, "",
-                    ).toDoubleOrNull(),
-                    junieLicense = com.angussoftware.fueldashboard.settings.loadStringSetting(
-                        com.angussoftware.fueldashboard.settings.FuelSettingsKeys.JUNIE_LICENSE, "",
-                    ).ifBlank { null },
-                    junieLastChecked = com.angussoftware.fueldashboard.settings.loadStringSetting(
-                        com.angussoftware.fueldashboard.settings.FuelSettingsKeys.JUNIE_LAST_CHECKED, "",
-                    ).toLongOrNull(),
-                )
+                // Canonical builder: SettingsSyncData.current — one shared
+                // construction path with GET /pair/{token} and MCP
+                // get_sync_data, so every endpoint serves byte-identical
+                // payloads for the same settings.
+                val syncData = buildSyncData()
                 call.respondText(
                     text = """{"sync_code":"${syncData.toCode()}","server_url":"${serverUrl ?: ""}"}""",
                     contentType = ContentType.Application.Json,
@@ -469,6 +469,76 @@ class EmbeddedServer(
                     }.toString(),
                     contentType = ContentType.Application.Json,
                 )
+            }
+
+            // ── Agent pairing bridge (one-time-token settings sync) ─────────
+            // Fleet SSOT: fleet-shared/knowledge/agent-app-bridge-pattern.md.
+            // POST /pair (server-key auth) mints a single-use token; the agent
+            // then fires fueldashboard://import?token=X&url=<this server> on
+            // the phone, which redeems it below. The server API key never
+            // rides the link.
+            post("/pair") {
+                if (!call.requireApiKey()) return@post
+                val now = epochMillisNow()
+                if (pairingTokens.size >= MAX_PAIRING_TOKENS) {
+                    pairingTokens.entries.minByOrNull { it.value.createdAt }?.let { oldest ->
+                        pairingTokens.remove(oldest.key)
+                    }
+                }
+                val token = UUID.randomUUID().toString()
+                pairingTokens[token] = PairingToken(
+                    createdAt = now,
+                    expiresAt = now + pairTokenTtlMs,
+                )
+                call.respond(
+                    PairResponse(
+                        token = token,
+                        url = pairingBaseUrl(call),
+                        expiresAt = now + pairTokenTtlMs,
+                    ),
+                )
+            }
+
+            // GET /pair/{token} — redeem a one-time token for the full
+            // settings payload. Auth IS the token: single-use, 60s TTL.
+            // Used/expired → 410; never minted (or rate-limit-evicted) → 404.
+            get("/pair/{token}") {
+                val token = call.parameters["token"]
+                if (token.isNullOrBlank()) {
+                    call.respond(HttpStatusCode.NotFound, ErrorResponse("unknown pairing token"))
+                    return@get
+                }
+                val now = epochMillisNow()
+                var known = false
+                var granted = false
+                // compute() is atomic per key: exactly one concurrent caller
+                // redeems; the rest see the redeemed tombstone → 410.
+                pairingTokens.compute(token) { _, entry ->
+                    when {
+                        entry == null -> null
+                        entry.redeemed -> {
+                            known = true
+                            entry
+                        }
+                        entry.expiresAt <= now -> {
+                            known = true
+                            entry.copy(redeemed = true)
+                        }
+                        else -> {
+                            known = true
+                            granted = true
+                            entry.copy(redeemed = true)
+                        }
+                    }
+                }
+                when {
+                    !known -> call.respond(HttpStatusCode.NotFound, ErrorResponse("unknown pairing token"))
+                    !granted -> call.respond(HttpStatusCode.Gone, ErrorResponse("pairing token expired or already used"))
+                    else -> call.respondText(
+                        text = buildSyncData().toJson(),
+                        contentType = ContentType.Application.Json,
+                    )
+                }
             }
 
             // ── Universal usage API (agnostic contract) ─────────────────────
@@ -584,6 +654,56 @@ class EmbeddedServer(
         return false
     }
 
+    /**
+     * The single construction path for cross-device settings payloads.
+     * GET /sync, GET /pair/{token}, and MCP get_sync_data must serve
+     * byte-identical data for the same settings — they all go through
+     * [SettingsSyncData.current].
+     */
+    private fun buildSyncData(): SettingsSyncData =
+        SettingsSyncData.current(serverUrl = serverUrl, serverApiKey = apiKey)
+
+    /**
+     * Reachable URL for the pairing mint response, in QR-path priority
+     * order: configured tunnel first, then wherever the caller actually
+     * reached us, then the LAN IP (same helper the QR path uses —
+     * [getLanUrl]).
+     *
+     * Divergence from the QR path, on purpose: no reachability probe here.
+     * DashboardBackend probes the tunnel at startup, asynchronously; a
+     * blocking probe inside this handler would tax every mint. A
+     * configured but dead tunnel hands the agent a dead link — the agent
+     * sees the URL in the mint response and can retry.
+     */
+    private fun pairingBaseUrl(call: ApplicationCall): String {
+        val tunnel = loadStringSetting(FuelSettingsKeys.TUNNEL_URL, "").trim().trimEnd('/')
+        if (tunnel.isNotEmpty()) return tunnel
+
+        // Request origin — but only when another device could dial it back;
+        // a loopback origin (agent calling from this desktop) is useless to
+        // a phone, so it falls through to the LAN IP.
+        val origin = runCatching { call.request.origin }.getOrNull()
+        // serverHost = the host the caller dialed (Host header) — the same
+        // address the phone can dial back (localHost is the accepting
+        // interface, which can differ behind proxies).
+        val host = origin?.serverHost?.trim().orEmpty()
+        if (host.isNotEmpty() && host != "0.0.0.0" && !isLoopbackHost(host)) {
+            val scheme = if (origin?.scheme.equals("https", ignoreCase = true)) "https" else "http"
+            // localPort = the port the caller actually dialed (`port` is
+            // deprecated in ktor 3.5; serverPort can disagree behind proxies).
+            val port = origin?.localPort ?: DEFAULT_PORT
+            val defaultPort = if (scheme == "https") 443 else 80
+            return "$scheme://$host" + if (port != defaultPort) ":$port" else ""
+        }
+        return getLanUrl()
+    }
+
+    private fun isLoopbackHost(host: String): Boolean =
+        host.equals("localhost", ignoreCase = true) ||
+            host == "::1" ||
+            host == "0:0:0:0:0:0:0:1" ||
+            host.startsWith("127.")
+
     private fun epochMillisNow(): Long = System.currentTimeMillis()
 
     /**
@@ -678,3 +798,23 @@ internal data class RegisteredAgent(
 // ── Existing private models ────────────────────────────────────────────
 
 @Serializable private data class ServiceInfo(val service: String, val version: String, val endpoints: List<String>)
+
+// ── Pairing bridge models (one-time-token settings sync) ────────────────
+
+@Serializable
+private data class PairResponse(
+    val token: String,
+    val url: String,
+    val expiresAt: Long,
+)
+
+/**
+ * One-time pairing token. Redeemed entries stay as tombstones so a reused
+ * token answers 410 (used) rather than 404 (unknown); rate-limit eviction
+ * (max 5 outstanding) is the only removal.
+ */
+private data class PairingToken(
+    val createdAt: Long,
+    val expiresAt: Long,
+    val redeemed: Boolean = false,
+)

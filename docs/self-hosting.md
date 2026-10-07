@@ -162,6 +162,48 @@ curl -s http://127.0.0.1:8322/dashboard -H "Authorization: Bearer $FUEL_KEY" | j
 
 The snapshot covers: provider levels/resets/errors, fuel projection (burn rate, exhaustion, headroom), the advisor's full advice state (regime + routine consumers with savings), all metered usage breakdowns (source / model / conversation / agent×model, 24h + 7d), wasted quota per provider (daily rows, observed vs estimated), the fuel event timeline, model drain rates, agents with models-in-use, and ingestion status. Secrets (API keys) are excluded by construction.
 
+## Headless pairing
+
+Set up the Android app without reading a QR code on the desktop screen. An
+agent (or a human on a terminal) mints a **one-time token** on the desktop
+server, then fires a `fueldashboard://import` deep link on the phone:
+
+```bash
+# 1. Mint a token (server-key auth, same key as MCP)
+curl -s -X POST http://127.0.0.1:8322/pair -H "Authorization: Bearer $FUEL_KEY"
+# → {"token":"5f8c...","url":"http://192.168.1.5:8322","expiresAt":1760000000000}
+
+# 2. Fire the link on the phone (adb) — or send the link any way you like:
+adb shell am start -a android.intent.action.VIEW \
+  -d "fueldashboard://import?token=5f8c...&url=http%3A%2F%2F192.168.1.5%3A8322"
+
+# The app redeems the token itself, one GET, no other credentials needed:
+# GET /pair/5f8c... → full settings payload, then applies them via the
+# normal import path.
+```
+
+Semantics and guarantees:
+
+- **The server API key never rides the link.** The one-time token is the only
+  credential in the intent; it is single-use and expires 60s after minting, so
+  it appearing in an agent's transcript or shell history is acceptable by
+  design. Redeeming returns the full settings payload — including the server
+  key — over the same transport the QR code would have used.
+- **Single-use:** redeeming once succeeds (`200`); the same token again answers
+  `410 Gone`. Expired → `410`, never minted → `404`. The app shows
+  "Pairing link expired — try again" for any of those and never retries.
+- **URL:** the mint response's `url` is the reachable address in QR-path
+  priority order — configured Cloudflare tunnel first, then the address you
+  reached the server by, then the LAN IP. `encodeURLPathPart`-safe URLs need no
+  encoding of their own; URLs with `&`/`%` characters must be percent-encoded.
+- **`autostart=1`** (optional) triggers one immediate provider refresh after
+  the import, so the phone shows live data right away.
+- **Plain-HTTP consent:** a `http://` link to another device makes the app ask
+  ("Sync settings?") before fetching — the payload includes provider API keys.
+  HTTPS (tunnel) links and `localhost` links fetch immediately.
+- **Rate limit:** max 5 outstanding tokens; minting a 6th evicts the oldest.
+- Fleet pattern SSOT: `fleet-shared/knowledge/agent-app-bridge-pattern.md`.
+
 ## MCP integration
 
 Add to any MCP client (e.g. Letta Code's global `mcpServers`):
