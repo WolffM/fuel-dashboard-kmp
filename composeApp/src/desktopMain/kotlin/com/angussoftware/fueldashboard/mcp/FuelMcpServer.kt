@@ -508,29 +508,13 @@ internal class FuelMcpServer(
                 "and 'server_url'.",
         ) {
             val settings = FuelSettingsStore.loadMultiProvider()
-            val agentSettings = AgentSettingsStore.load()
             val apiKey = serverApiKeyProvider()
             val url = serverUrlProvider()
 
-            // Canonical builder: real theme, junie, section orders, usage
-            // sources, prefs — hand-building hardcoded theme defaults that
-            // silently reset the receiver's theme on import.
-            val syncData = SettingsSyncData.from(
-                settings = settings,
-                agentSettings = agentSettings,
-                themeController = com.angussoftware.fueldashboard.settings.ThemeController,
-                serverUrl = url,
-                serverApiKey = apiKey,
-                junieBalance = com.angussoftware.fueldashboard.settings.loadStringSetting(
-                    com.angussoftware.fueldashboard.settings.FuelSettingsKeys.JUNIE_BALANCE, "",
-                ).toDoubleOrNull(),
-                junieLicense = com.angussoftware.fueldashboard.settings.loadStringSetting(
-                    com.angussoftware.fueldashboard.settings.FuelSettingsKeys.JUNIE_LICENSE, "",
-                ).ifBlank { null },
-                junieLastChecked = com.angussoftware.fueldashboard.settings.loadStringSetting(
-                    com.angussoftware.fueldashboard.settings.FuelSettingsKeys.JUNIE_LAST_CHECKED, "",
-                ).toLongOrNull(),
-            )
+            // Canonical builder: SettingsSyncData.current — one shared
+            // construction path with GET /sync and GET /pair/{token}, so
+            // every export surface serves byte-identical data.
+            val syncData = SettingsSyncData.current(serverUrl = url, serverApiKey = apiKey)
             val syncCode = syncData.toCode()
 
             val response = buildJsonObject {
