@@ -215,6 +215,8 @@ fun ProviderContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                } else if (config.kind == ProviderKind.CLAUDE_CODE && limitingWindowOf(report) != null) {
+                    LimitingWindowGauge(report)
                 } else if (report.windows.isNotEmpty()) {
                     report.windows.forEachIndexed { idx, w ->
                         if (idx > 0) Spacer(Modifier.height(10.dp))
@@ -237,7 +239,9 @@ fun ProviderContent(
         // rate headers, OpenRouter spend-only "$1.25 today | $74.25 this
         // month"). Without this line those degraded states render as an empty
         // tile with just the provider name.
-        if (report.rawDisplay.isNotBlank()) {
+        // Skipped for a plan gauge: its "used 5h:3% weekly:98%" repeats the
+        // gauge above in a second notation.
+        if (report.rawDisplay.isNotBlank() && config.kind != ProviderKind.CLAUDE_CODE) {
             Spacer(Modifier.height(6.dp))
             Text(
                 report.rawDisplay,

@@ -523,6 +523,7 @@ class DashboardBackend private constructor(
                         history = br.history,
                         quotaType = quotaType,
                         windowHours = report?.windowHours ?: 0.0,
+                        limitingWindow = report?.limitingWindow,
                     )
                 }
             }

@@ -166,13 +166,17 @@ class ClaudeCodeSubscriptionAdapter(
             SEVEN_DAY_WINDOW_HOURS,
         )
 
-        // The 5-hour window leads: it is the one that gates the next turn and
-        // its countdown is legible in hours. The headline's %, reset and
-        // window length all come from that single window — never mixed across
-        // two, which would pair one window's percentage with another's
-        // countdown (PR #84).
+        // The limiting window leads. Both windows gate every turn, so the one
+        // with least left is the one that decides whether work can run: 97%
+        // of a 5-hour window means nothing when the week is spent. A tie goes
+        // to the longer window, because that is how long you would actually
+        // be blocked. The headline's %, reset and window length all come from
+        // that single window — never mixed across two, which would pair one
+        // window's percentage with another's countdown (PR #84).
         val windows = listOfNotNull(fiveHour, weekly)
-        val headline = windows.firstOrNull()
+        val headline = windows.minWithOrNull(
+            compareBy<ReportWindow> { it.remainingPct }.thenByDescending { it.windowHours },
+        )
 
         val severity = severityByKind[ClaudeCodeUsageLimit.KIND_WEEKLY_ALL]
             ?: severityByKind[ClaudeCodeUsageLimit.KIND_SESSION]
@@ -187,6 +191,7 @@ class ClaudeCodeSubscriptionAdapter(
             available = windows.isNotEmpty(),
             windows = windows,
             detail = severity,
+            limitingWindow = headline?.name?.takeIf { windows.size > 1 },
             rawDisplay = listOfNotNull(
                 response.fiveHour?.utilization?.let { "5h:${it.roundToInt()}%" },
                 response.sevenDay?.utilization?.let { "weekly:${it.roundToInt()}%" },

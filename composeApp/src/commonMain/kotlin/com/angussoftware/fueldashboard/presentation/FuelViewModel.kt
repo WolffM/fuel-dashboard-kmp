@@ -255,6 +255,8 @@ data class ProviderBurnRateDisplay(
     val history: List<Double>,
     val quotaType: QuotaType = QuotaType.RATE_WINDOW,
     val windowHours: Double = 0.0,
+    /** See [com.angussoftware.fueldashboard.model.ProviderReport.limitingWindow]. */
+    val limitingWindow: String? = null,
 )
 
 /**
@@ -2300,11 +2302,16 @@ class FuelViewModel(
             if (!report.available) continue
             val name = report.displayName.ifBlank { providerId }
             val inUse = servingProviderId == null || providerId == servingProviderId
+            // Which window ran dry decides how long the wait is — an empty
+            // 5-hour window is back by tonight, an empty week is not.
+            val window = report.limitingWindow?.lowercase()
+            val asSuffix = window?.let { " ($it limit)" }.orEmpty()
+            val inParens = window?.let { ", $it limit" }.orEmpty()
             when {
-                inUse && pct < 10 -> add("CRITICAL: $name at $pct%")
-                inUse && pct < 25 -> add("WARNING: $name at $pct%")
-                pct == 0 -> add("$name is empty (0%) — not in use")
-                pct < 10 -> add("$name is nearly empty ($pct%) — not in use")
+                inUse && pct < 10 -> add("CRITICAL: $name at $pct%$asSuffix")
+                inUse && pct < 25 -> add("WARNING: $name at $pct%$asSuffix")
+                pct == 0 -> add("$name is empty (0%$inParens) — not in use")
+                pct < 10 -> add("$name is nearly empty ($pct%$inParens) — not in use")
             }
         }
     }

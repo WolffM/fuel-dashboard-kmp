@@ -16,6 +16,9 @@ fun formatCountdown(resetsAtEpochMs: Long, nowMs: Long = epochMillis()): String 
     val minutes = totalMinutes % 60L
 
     return when {
+        // A weekly window's "149h 33m" makes you do the division; minutes
+        // stop mattering at that range.
+        hours >= 24L -> "${hours / 24L}d ${hours % 24L}h"
         hours > 0L -> "${hours}h ${minutes}m"
         minutes > 0L -> "${minutes}m"
         else -> "<1m"
