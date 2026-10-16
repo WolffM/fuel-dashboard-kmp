@@ -12,7 +12,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddCard
+import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.CardMembership
+import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.DataUsage
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -21,10 +37,6 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,7 +91,13 @@ fun ProviderContent(
      * off, or null when it is not parked.
      */
     rateLimitedUntil: Long? = null,
+    /** See [com.angussoftware.fueldashboard.presentation.DashboardState.combinedPlanGauge]. */
+    combinedPlanGauge: Boolean = true,
 ) {
+    val useCombinedGauge = combinedPlanGauge &&
+        config.kind == ProviderKind.CLAUDE_CODE &&
+        report != null && limitingWindowOf(report) != null
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -126,6 +144,11 @@ fun ProviderContent(
                     needsCredentials = error != null || report?.available != true,
                     onLogIn = onLogIn,
                 )
+                // Where this provider's usage, billing and keys live, one icon
+                // per page. Up here rather than under the gauge: they are about
+                // the account, not the reading. Gated by showHelp — navigation
+                // is help, not data.
+                if (showHelp) ProviderLinkIcons(config.kind)
             }
             if (error != null) {
                 Text("\u26A0 Error", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
@@ -215,6 +238,8 @@ fun ProviderContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                } else if (useCombinedGauge) {
+                    LimitingWindowGauge(report)
                 } else if (report.windows.isNotEmpty()) {
                     report.windows.forEachIndexed { idx, w ->
                         if (idx > 0) Spacer(Modifier.height(10.dp))
@@ -237,7 +262,9 @@ fun ProviderContent(
         // rate headers, OpenRouter spend-only "$1.25 today | $74.25 this
         // month"). Without this line those degraded states render as an empty
         // tile with just the provider name.
-        if (report.rawDisplay.isNotBlank()) {
+        // Skipped under the combined gauge: its "used 5h:3% weekly:98%"
+        // repeats the gauge in a second notation.
+        if (report.rawDisplay.isNotBlank() && !useCombinedGauge) {
             Spacer(Modifier.height(6.dp))
             Text(
                 report.rawDisplay,
@@ -257,12 +284,6 @@ fun ProviderContent(
         // billing, and spend live only in AI Studio. Point users there.
         if (config.kind == ProviderKind.GEMINI && showHelp) {
             GeminiStudioLinks()
-        }
-
-        // Every provider: link to where its usage limits / billing / credit
-        // balance lives. Gated by showHelp — navigation is help, not data.
-        if (showHelp) {
-            ProviderConsoleLink(config.kind)
         }
 
         // Groq/Mistral(regular key): monitoring itself consumes request quota.
@@ -308,99 +329,94 @@ private fun PrepaidCreditBalance(report: ProviderReport) {
 }
 
 /**
- * Expandable/collapsible links section per provider — multiple relevant
- * console pages (usage gauge, billing, rate limits, API keys, etc.) since
- * different moments call for different pages. Collapsed by default to keep
- * tiles compact; expands with a "Links" toggle.
+ * One icon per console page — usage, billing, limits, keys — each opening its
+ * page directly. The label is the icon's tooltip and content description, so
+ * the row stays compact without the icons becoming a guessing game.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProviderConsoleLink(kind: ProviderKind) {
+private fun ProviderLinkIcons(kind: ProviderKind) {
     val links = providerLinks(kind)
     if (links.isEmpty()) return
-    var expanded by remember { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
-
-    Column {
-        Text(
-            "Links (${links.size})",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                textDecoration = TextDecoration.Underline,
-                modifier = Modifier
-                .clickable { expanded = !expanded }
-                .padding(vertical = 2.dp),
-        )
-        if (expanded) {
-            links.forEach { (label, url) ->
-                Text(
-                    "  $label",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textDecoration = TextDecoration.Underline,
-                modifier = Modifier
-                        .clickable { uriHandler.openUri(url) }
-                        .padding(vertical = 1.dp, horizontal = 4.dp)
-                        .fillMaxWidth(),
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        links.forEach { link ->
+            TooltipBox(
+                positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                tooltip = { PlainTooltip { Text(link.label) } },
+                state = rememberTooltipState(),
+            ) {
+                Icon(
+                    imageVector = link.icon,
+                    contentDescription = link.label,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable { uriHandler.openUri(link.url) }
+                        .padding(4.dp)
+                        .size(18.dp),
                 )
             }
         }
     }
 }
 
+private class ProviderLink(val label: String, val url: String, val icon: ImageVector)
+
 /** All useful console links per provider — usage, billing, limits, keys. */
-private fun providerLinks(kind: ProviderKind): List<Pair<String, String>> = when (kind) {
+private fun providerLinks(kind: ProviderKind): List<ProviderLink> = when (kind) {
     ProviderKind.ZAI -> listOf(
-        "Usage gauge" to "https://z.ai/manage-apikey/coding-plan/personal/usage",
-        "Billing & credits" to "https://z.ai/manage-apikey/billing",
-        "Rate limits" to "https://z.ai/manage-apikey/rate-limits",
+        ProviderLink("Usage gauge", "https://z.ai/manage-apikey/coding-plan/personal/usage", Icons.Default.DataUsage),
+        ProviderLink("Billing & credits", "https://z.ai/manage-apikey/billing", Icons.Default.CreditCard),
+        ProviderLink("Rate limits", "https://z.ai/manage-apikey/rate-limits", Icons.Default.Speed),
     )
     ProviderKind.LETTA_CLOUD -> listOf(
-        "Usage dashboard" to "https://platform.letta.com/settings/organization/usage",
+        ProviderLink("Usage dashboard", "https://platform.letta.com/settings/organization/usage", Icons.Default.DataUsage),
     )
     ProviderKind.OPENAI -> listOf(
-        "Credit balance & billing" to "https://platform.openai.com/settings/organization/billing",
-        "Usage" to "https://platform.openai.com/usage",
-        "API keys" to "https://platform.openai.com/api-keys",
-        "Admin keys (for spend tracking)" to "https://platform.openai.com/settings/organization/admin-keys",
+        ProviderLink("Credit balance & billing", "https://platform.openai.com/settings/organization/billing", Icons.Default.CreditCard),
+        ProviderLink("Usage", "https://platform.openai.com/usage", Icons.Default.DataUsage),
+        ProviderLink("API keys", "https://platform.openai.com/api-keys", Icons.Default.Key),
+        ProviderLink("Admin keys (for spend tracking)", "https://platform.openai.com/settings/organization/admin-keys", Icons.Default.AdminPanelSettings),
     )
     ProviderKind.ANTHROPIC -> listOf(
-        "Billing" to "https://console.anthropic.com/settings/billing",
-        "Usage" to "https://console.anthropic.com/settings/usage",
-        "API keys" to "https://console.anthropic.com/settings/keys",
+        ProviderLink("Billing", "https://console.anthropic.com/settings/billing", Icons.Default.CreditCard),
+        ProviderLink("Usage", "https://console.anthropic.com/settings/usage", Icons.Default.DataUsage),
+        ProviderLink("API keys", "https://console.anthropic.com/settings/keys", Icons.Default.Key),
     )
     ProviderKind.DEEPSEEK -> listOf(
-        "Usage & balance" to "https://platform.deepseek.com/usage",
-        "API keys" to "https://platform.deepseek.com/api_keys",
-        "Top up" to "https://platform.deepseek.com/topup",
+        ProviderLink("Usage & balance", "https://platform.deepseek.com/usage", Icons.Default.DataUsage),
+        ProviderLink("API keys", "https://platform.deepseek.com/api_keys", Icons.Default.Key),
+        ProviderLink("Top up", "https://platform.deepseek.com/topup", Icons.Default.AddCard),
     )
     ProviderKind.GROQ -> listOf(
-        "Rate limits" to "https://console.groq.com/settings/limits",
-        "API keys" to "https://console.groq.com/keys",
+        ProviderLink("Rate limits", "https://console.groq.com/settings/limits", Icons.Default.Speed),
+        ProviderLink("API keys", "https://console.groq.com/keys", Icons.Default.Key),
     )
     ProviderKind.MISTRAL -> listOf(
-        "Usage" to "https://console.mistral.ai/usage",
-        "API keys" to "https://console.mistral.ai/api-keys",
+        ProviderLink("Usage", "https://console.mistral.ai/usage", Icons.Default.DataUsage),
+        ProviderLink("API keys", "https://console.mistral.ai/api-keys", Icons.Default.Key),
     )
     ProviderKind.OPENROUTER -> listOf(
-        "Balance & credits" to "https://openrouter.ai/credits",
-        "API keys" to "https://openrouter.ai/settings/keys",
-        "Activity log" to "https://openrouter.ai/activity",
+        ProviderLink("Balance & credits", "https://openrouter.ai/credits", Icons.Default.CreditCard),
+        ProviderLink("API keys", "https://openrouter.ai/settings/keys", Icons.Default.Key),
+        ProviderLink("Activity log", "https://openrouter.ai/activity", Icons.Default.History),
     )
     ProviderKind.XAI -> listOf(
-        "Usage explorer" to "https://console.x.ai/team/default/usage",
-        "Billing & credits" to "https://console.x.ai/team/default/billing",
-        "API keys" to "https://console.x.ai/team/default/api-keys",
+        ProviderLink("Usage explorer", "https://console.x.ai/team/default/usage", Icons.Default.DataUsage),
+        ProviderLink("Billing & credits", "https://console.x.ai/team/default/billing", Icons.Default.CreditCard),
+        ProviderLink("API keys", "https://console.x.ai/team/default/api-keys", Icons.Default.Key),
     )
     ProviderKind.QWEN -> listOf(
-        "Model Studio console" to "https://bailian.console.aliyun.com/",
+        ProviderLink("Model Studio console", "https://bailian.console.aliyun.com/", Icons.AutoMirrored.Filled.OpenInNew),
     )
     ProviderKind.TOGETHER -> listOf(
-        "Billing" to "https://api.together.ai/settings/organization/~current/billing",
-        "API keys" to "https://api.together.ai/settings/api-keys",
+        ProviderLink("Billing", "https://api.together.ai/settings/organization/~current/billing", Icons.Default.CreditCard),
+        ProviderLink("API keys", "https://api.together.ai/settings/api-keys", Icons.Default.Key),
     )
     ProviderKind.CLAUDE_CODE -> listOf(
-        "Plan usage & limits" to "https://claude.ai/settings/usage",
-        "Manage subscription" to "https://claude.ai/settings/billing",
+        ProviderLink("Plan usage & limits", "https://claude.ai/settings/usage", Icons.Default.DataUsage),
+        ProviderLink("Manage subscription", "https://claude.ai/settings/billing", Icons.Default.CardMembership),
     )
     ProviderKind.GEMINI, ProviderKind.JUNIE, ProviderKind.CONNECTED_API -> emptyList()
 }

@@ -172,6 +172,24 @@ fun SettingsPanel(
                 )
             }
 
+            // Claude plan cards: one bar for the limiting window (default),
+            // or the original bar per window for anyone who prefers both.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = "Combined plan gauge",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                Switch(
+                    checked = state.combinedPlanGauge,
+                    onCheckedChange = viewModel::setCombinedPlanGauge,
+                )
+            }
+
             Spacer(Modifier.height(12.dp))
 
             // --- Providers section (core config — first) ---

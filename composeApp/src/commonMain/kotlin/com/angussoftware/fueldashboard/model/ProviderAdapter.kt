@@ -49,6 +49,12 @@ data class ProviderReport(
     val creditsResetAt: Long? = null, // when monthly quota refreshes (epoch ms)
     /** Provider-specific secondary information, such as Junie's license tier. */
     val detail: String? = null,
+    /**
+     * Name of the window the headline was taken from, when the provider gates
+     * work on several at once and the headline is whichever is closest to
+     * empty. Null when there is only one window to choose from.
+     */
+    val limitingWindow: String? = null,
 )
 
 /**

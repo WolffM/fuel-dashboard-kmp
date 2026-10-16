@@ -414,6 +414,7 @@ private fun MobileFuelContent(
                         isServingClaudeCode =
                             state.claudeCodeRoute?.matchedProviderId == config.id,
                         isSettling = config.id in state.settlingProviderIds,
+                        combinedPlanGauge = state.combinedPlanGauge,
                     )
                 }
                 }
@@ -515,6 +516,7 @@ private fun MobileProviderCard(
     showHelp: Boolean,
     isServingClaudeCode: Boolean = false,
     isSettling: Boolean = false,
+    combinedPlanGauge: Boolean = true,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -536,6 +538,7 @@ private fun MobileProviderCard(
                 onCheckJunieBalance = null,
                 boxedCreditBalance = false,
                 isServingClaudeCode = isServingClaudeCode,
+                combinedPlanGauge = combinedPlanGauge,
             )
         }
     }

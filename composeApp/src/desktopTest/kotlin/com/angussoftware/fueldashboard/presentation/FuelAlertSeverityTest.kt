@@ -22,14 +22,20 @@ class FuelAlertSeverityTest {
     @AfterTest
     fun close() = vm.close()
 
-    private fun report(id: String, name: String, pct: Int?, available: Boolean = true) =
-        ProviderReport(
-            providerId = id,
-            displayName = name,
-            type = ProviderType.WINDOW_CREDIT,
-            remainingPct = pct,
-            available = available,
-        )
+    private fun report(
+        id: String,
+        name: String,
+        pct: Int?,
+        available: Boolean = true,
+        limitingWindow: String? = null,
+    ) = ProviderReport(
+        providerId = id,
+        displayName = name,
+        type = ProviderType.WINDOW_CREDIT,
+        remainingPct = pct,
+        available = available,
+        limitingWindow = limitingWindow,
+    )
 
     private fun alerts(vararg reports: Pair<String, ProviderReport>, serving: String?) =
         vm.generateFuelAlerts(reports.toMap(), serving)
@@ -113,6 +119,23 @@ class FuelAlertSeverityTest {
             serving = null,
         )
         assertEquals(emptyList(), out)
+    }
+
+    @Test
+    fun theLimitingWindowIsNamedWhenThereIsOne() {
+        // An empty 5-hour window and an empty week are very different waits.
+        val out = alerts(
+            "james" to report("james", "Claude — james", 2, limitingWindow = "Weekly"),
+            "matth2" to report("matth2", "Claude — matth2", 0, limitingWindow = "5-hour"),
+            serving = "james",
+        )
+        assertEquals(
+            listOf(
+                "CRITICAL: Claude — james at 2% (weekly limit)",
+                "Claude — matth2 is empty (0%, 5-hour limit) — not in use",
+            ),
+            out,
+        )
     }
 
     @Test

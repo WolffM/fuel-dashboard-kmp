@@ -63,15 +63,46 @@ class ClaudeCodeSubscriptionAdapterTest {
     }
 
     @Test
-    fun headlineComesFromTheFiveHourWindowOnly() {
+    fun headlineIsTheWeeklyWindowWhenTheWeekIsTheLimit() {
+        // 83% of the 5-hour window is irrelevant with 23% of the week left.
         // The headline's %, reset and window length must all come from ONE
         // window — mixing them pairs one window's percentage with another's
         // countdown (PR #84).
         val report = adapter.mapToProviderReport(liveResponse())
 
-        assertEquals(83, report.remainingPct)
+        assertEquals(23, report.remainingPct)
+        assertEquals(168.0, report.windowHours)
+        assertEquals(report.windows[1].resetsAt, report.resetsAt)
+        assertEquals("Weekly", report.limitingWindow)
+    }
+
+    @Test
+    fun headlineIsTheFiveHourWindowWhenItIsTheLimit() {
+        val report = adapter.mapToProviderReport(
+            ClaudeCodeUsageResponse(
+                fiveHour = ClaudeCodeUsageWindow(utilization = 100.0, resetsAt = "2026-09-24T03:39:59Z"),
+                sevenDay = ClaudeCodeUsageWindow(utilization = 22.0, resetsAt = "2026-09-25T22:59:59Z"),
+            ),
+        )
+
+        assertEquals(0, report.remainingPct)
         assertEquals(5.0, report.windowHours)
         assertEquals(report.windows[0].resetsAt, report.resetsAt)
+        assertEquals("5-hour", report.limitingWindow)
+    }
+
+    @Test
+    fun aTieGoesToTheLongerWindow() {
+        // Both empty: the week is what actually keeps you blocked.
+        val report = adapter.mapToProviderReport(
+            ClaudeCodeUsageResponse(
+                fiveHour = ClaudeCodeUsageWindow(utilization = 100.0, resetsAt = "2026-09-24T03:39:59Z"),
+                sevenDay = ClaudeCodeUsageWindow(utilization = 100.0, resetsAt = "2026-09-25T22:59:59Z"),
+            ),
+        )
+
+        assertEquals("Weekly", report.limitingWindow)
+        assertEquals(report.windows[1].resetsAt, report.resetsAt)
     }
 
     @Test
@@ -104,6 +135,7 @@ class ClaudeCodeSubscriptionAdapterTest {
         // rather than reporting a fabricated 0% or 100%.
         assertEquals(23, report.remainingPct)
         assertEquals(168.0, report.windowHours)
+        assertNull(report.limitingWindow, "with one window there is nothing to be limited by")
     }
 
     @Test
