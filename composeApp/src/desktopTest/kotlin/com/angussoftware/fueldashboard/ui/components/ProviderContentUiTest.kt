@@ -74,6 +74,7 @@ class ProviderContentUiTest {
         onSwapNow: (() -> Unit)? = null,
         switchStatus: SwitchRunStatus? = null,
         showHelp: Boolean = false,
+        combinedPlanGauge: Boolean = true,
         assertions: androidx.compose.ui.test.ComposeUiTest.() -> Unit,
     ) = runDesktopComposeUiTest {
         setContent {
@@ -94,6 +95,7 @@ class ProviderContentUiTest {
                         isSwapping = isSwapping,
                         onSwapNow = onSwapNow,
                         switchStatus = switchStatus,
+                        combinedPlanGauge = combinedPlanGauge,
                     )
                 }
             }
@@ -128,6 +130,16 @@ class ProviderContentUiTest {
         onNodeWithText("5-hour 97%", substring = true).assertExists("the other window stays visible as a marker")
         onAllNodesWithText("used 5h:3% weekly:98%").assertCountEquals(0)
     }
+
+    @Test
+    fun claudePlan_settingOffRestoresABarPerWindow() =
+        render(claudeReport(), providerConfig = claudeConfig, combinedPlanGauge = false) {
+            onNodeWithText("5-hour").assertExists()
+            onNodeWithText("Weekly").assertExists()
+            onAllNodesWithText("97% left").assertCountEquals(1)
+            onAllNodesWithText("2% left").assertCountEquals(1)
+            onAllNodesWithText("Weekly is the limit", substring = true).assertCountEquals(0)
+        }
 
     @Test
     fun claudePlan_linksAreHeaderIconsNotAListBelow() =

@@ -49,6 +49,7 @@ data class SettingsSyncData(
     val showHelp: Boolean? = null,
     val showThemeIcon: Boolean? = null,
     val showAdvisor: Boolean? = null,
+    val combinedPlanGauge: Boolean? = null,
     // Custom feedback endpoints — null when at baked defaults.
     val feedbackUrl: String? = null,
     val feedbackRepo: String? = null,
@@ -122,6 +123,7 @@ data class SettingsSyncData(
             showHelp = loadStringSetting(FuelSettingsKeys.SHOW_HELP, "").ifBlank { null }?.toBoolean(),
             showThemeIcon = loadStringSetting(FuelSettingsKeys.SHOW_THEME_ICON, "").ifBlank { null }?.toBoolean(),
             showAdvisor = loadStringSetting(FuelSettingsKeys.SHOW_ADVISOR, "").ifBlank { null }?.toBoolean(),
+            combinedPlanGauge = loadStringSetting(FuelSettingsKeys.COMBINED_PLAN_GAUGE, "").ifBlank { null }?.toBoolean(),
             feedbackUrl = loadStringSetting(FuelSettingsKeys.FEEDBACK_URL, "").takeIf { it.isNotBlank() },
             feedbackRepo = loadStringSetting(FuelSettingsKeys.FEEDBACK_REPO, "").takeIf { it.isNotBlank() },
         )
@@ -215,6 +217,7 @@ data class SettingsSyncData(
         showHelp = null,
         showThemeIcon = null,
         showAdvisor = null,
+        combinedPlanGauge = null,
         feedbackUrl = null,
         feedbackRepo = null,
     )

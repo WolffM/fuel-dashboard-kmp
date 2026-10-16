@@ -91,7 +91,13 @@ fun ProviderContent(
      * off, or null when it is not parked.
      */
     rateLimitedUntil: Long? = null,
+    /** See [com.angussoftware.fueldashboard.presentation.DashboardState.combinedPlanGauge]. */
+    combinedPlanGauge: Boolean = true,
 ) {
+    val useCombinedGauge = combinedPlanGauge &&
+        config.kind == ProviderKind.CLAUDE_CODE &&
+        report != null && limitingWindowOf(report) != null
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -232,7 +238,7 @@ fun ProviderContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else if (config.kind == ProviderKind.CLAUDE_CODE && limitingWindowOf(report) != null) {
+                } else if (useCombinedGauge) {
                     LimitingWindowGauge(report)
                 } else if (report.windows.isNotEmpty()) {
                     report.windows.forEachIndexed { idx, w ->
@@ -256,9 +262,9 @@ fun ProviderContent(
         // rate headers, OpenRouter spend-only "$1.25 today | $74.25 this
         // month"). Without this line those degraded states render as an empty
         // tile with just the provider name.
-        // Skipped for a plan gauge: its "used 5h:3% weekly:98%" repeats the
-        // gauge above in a second notation.
-        if (report.rawDisplay.isNotBlank() && config.kind != ProviderKind.CLAUDE_CODE) {
+        // Skipped under the combined gauge: its "used 5h:3% weekly:98%"
+        // repeats the gauge in a second notation.
+        if (report.rawDisplay.isNotBlank() && !useCombinedGauge) {
             Spacer(Modifier.height(6.dp))
             Text(
                 report.rawDisplay,
