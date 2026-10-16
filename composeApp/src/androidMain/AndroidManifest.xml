@@ -24,6 +24,16 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Headless pairing (fleet SSOT: agent-app-bridge-pattern.md):
+                 agents fire fueldashboard://import?token=X&url=Y so the phone
+                 can redeem a one-time settings token from the desktop server.
+                 The long-lived server API key never rides the link. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="fueldashboard" android:host="import" />
+            </intent-filter>
         </activity>
 
         <service
