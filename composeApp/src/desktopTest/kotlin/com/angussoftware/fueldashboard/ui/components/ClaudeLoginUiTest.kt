@@ -86,14 +86,13 @@ class ClaudeLoginUiTest {
     }
 
     @Test
-    fun aHealthyAccountStillOffersReLogIn() {
-        // Never disabled: re-authenticating a working account is legitimate.
-        var clicks = 0
-        card(report = reading(available = true), onLogIn = { clicks++ }) {
-            onNodeWithText("Re-log in").assertExists().performClick()
+    fun aHealthyAccountShowsNoLoginControl() {
+        // Nothing to repair, so nothing to offer: a login button on every
+        // working card is clutter.
+        card(report = reading(available = true), onLogIn = {}) {
             onNodeWithText("Log in").assertDoesNotExist()
+            onNodeWithText("Re-log in").assertDoesNotExist()
         }
-        assertEquals(1, clicks)
     }
 
     @Test

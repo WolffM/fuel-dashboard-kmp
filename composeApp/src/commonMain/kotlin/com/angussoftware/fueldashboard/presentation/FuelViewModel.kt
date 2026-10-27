@@ -255,6 +255,8 @@ data class ProviderBurnRateDisplay(
     val history: List<Double>,
     val quotaType: QuotaType = QuotaType.RATE_WINDOW,
     val windowHours: Double = 0.0,
+    /** See [com.angussoftware.fueldashboard.model.ProviderReport.limitingWindow]. */
+    val limitingWindow: String? = null,
 )
 
 /**
@@ -289,6 +291,11 @@ data class DashboardState(
     val showHelp: Boolean = true,
     val showThemeIcon: Boolean = true,
     val showAdvisor: Boolean = false, // advisor hidden by default (Harry, Aug 24)
+    /**
+     * Claude plan cards show one bar for the window that limits work, with
+     * the other window as a marker on it. Off restores a bar per window.
+     */
+    val combinedPlanGauge: Boolean = true,
     val checkingProviderIds: Set<String> = emptySet(),
     /**
      * Providers parked after a server asked us to back off, by the epoch
@@ -481,6 +488,7 @@ class FuelViewModel(
             showHelp = loadStringSetting(FuelSettingsKeys.SHOW_HELP, "true").toBoolean(),
             showThemeIcon = loadStringSetting(FuelSettingsKeys.SHOW_THEME_ICON, "true").toBoolean(),
             showAdvisor = loadStringSetting(FuelSettingsKeys.SHOW_ADVISOR, "false").toBoolean(),
+            combinedPlanGauge = loadStringSetting(FuelSettingsKeys.COMBINED_PLAN_GAUGE, "true").toBoolean(),
         ),
     )
     val state: StateFlow<DashboardState> = _state.asStateFlow()
@@ -733,6 +741,11 @@ class FuelViewModel(
     fun setShowAdvisor(showAdvisor: Boolean) {
         saveStringSetting(FuelSettingsKeys.SHOW_ADVISOR, showAdvisor.toString())
         _state.update { it.copy(showAdvisor = showAdvisor) }
+    }
+
+    fun setCombinedPlanGauge(combined: Boolean) {
+        saveStringSetting(FuelSettingsKeys.COMBINED_PLAN_GAUGE, combined.toString())
+        _state.update { it.copy(combinedPlanGauge = combined) }
     }
 
     /** Runs Junie's chargeable balance command only after an explicit desktop user action. */
@@ -1196,6 +1209,7 @@ class FuelViewModel(
             syncData.showHelp?.let { help -> setShowHelp(help) }
             syncData.showThemeIcon?.let { showIcon -> setShowThemeIcon(showIcon) }
             syncData.showAdvisor?.let { showAdvisor -> setShowAdvisor(showAdvisor) }
+            syncData.combinedPlanGauge?.let { combined -> setCombinedPlanGauge(combined) }
 
             // Custom feedback endpoints
             syncData.feedbackUrl?.let { url -> saveStringSetting(FuelSettingsKeys.FEEDBACK_URL, url) }
@@ -2296,11 +2310,16 @@ class FuelViewModel(
             if (!report.available) continue
             val name = report.displayName.ifBlank { providerId }
             val inUse = servingProviderId == null || providerId == servingProviderId
+            // Which window ran dry decides how long the wait is — an empty
+            // 5-hour window is back by tonight, an empty week is not.
+            val window = report.limitingWindow?.lowercase()
+            val asSuffix = window?.let { " ($it limit)" }.orEmpty()
+            val inParens = window?.let { ", $it limit" }.orEmpty()
             when {
-                inUse && pct < 10 -> add("CRITICAL: $name at $pct%")
-                inUse && pct < 25 -> add("WARNING: $name at $pct%")
-                pct == 0 -> add("$name is empty (0%) — not in use")
-                pct < 10 -> add("$name is nearly empty ($pct%) — not in use")
+                inUse && pct < 10 -> add("CRITICAL: $name at $pct%$asSuffix")
+                inUse && pct < 25 -> add("WARNING: $name at $pct%$asSuffix")
+                pct == 0 -> add("$name is empty (0%$inParens) — not in use")
+                pct < 10 -> add("$name is nearly empty ($pct%$inParens) — not in use")
             }
         }
     }

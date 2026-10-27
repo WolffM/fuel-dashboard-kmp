@@ -634,6 +634,7 @@ internal fun FuelColumnContent(
                             report = report,
                             error = error,
                             showHelp = state.showHelp,
+                            combinedPlanGauge = state.combinedPlanGauge,
                             isChecking = config.id in state.checkingProviderIds,
                             onCheckJunieBalance = if (canCheckJunieBalance) {
                                 { viewModel.checkJunieCredits(config.id) }
@@ -736,6 +737,7 @@ private fun ProviderSection(
     isLoggingIn: Boolean = false,
     onLogIn: (() -> Unit)? = null,
     loginStatus: com.angussoftware.fueldashboard.network.ClaudeLoginLaunch? = null,
+    combinedPlanGauge: Boolean = true,
 ) {
     com.angussoftware.fueldashboard.ui.components.ProviderContent(
         config = config,
@@ -757,5 +759,6 @@ private fun ProviderSection(
         isLoggingIn = isLoggingIn,
         onLogIn = onLogIn,
         loginStatus = loginStatus,
+        combinedPlanGauge = combinedPlanGauge,
     )
 }

@@ -278,11 +278,17 @@ class FuelSnapshotRepository(driver: SqlDriver) {
         val providerIds = queries.selectAllLatestProviderSnapshots().executeAsList()
         val now = epochMillis()
         return providerIds.mapNotNull { pid ->
-            val snapshots = queries.selectProviderFuelSnapshots(pid, now - windowMs).executeAsList()
+            val recorded = queries.selectProviderFuelSnapshots(pid, now - windowMs).executeAsList()
                 .filter { it.remaining_pct != null }
-            if (snapshots.isEmpty()) return@mapNotNull null
+            if (recorded.isEmpty()) return@mapNotNull null
 
-            val latest = snapshots.last()
+            // Only the trailing run from the same window. A provider whose
+            // headline is its limiting window can switch windows between
+            // polls (5-hour -> weekly), and a rate across that seam would
+            // compare two unrelated percentages — 97% then 2% reads as a
+            // 95%/hr burn that never happened.
+            val latest = recorded.last()
+            val snapshots = recorded.takeLastWhile { it.window_hours == latest.window_hours }
             val currentPct = latest.remaining_pct ?: return@mapNotNull null
 
             // Compute burn rate

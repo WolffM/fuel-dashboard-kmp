@@ -311,14 +311,17 @@ private fun RateWindowRow(br: ProviderBurnRateDisplay) {    val pct = br.current
             }
         }
 
-        // Info line — NOT alarming. Rate windows self-heal.
-        val infoText = if (br.burnRatePerHr != null && br.burnRatePerHr > 0 && pct != null && pct < 30) {
+        // Info line — NOT alarming. Rate windows self-heal. Leads with the
+        // limiting window when there is a choice of windows, because the
+        // percentage alone does not say whether the wait is hours or days.
+        val rateText = if (br.burnRatePerHr != null && br.burnRatePerHr > 0 && pct != null && pct < 30) {
             "Burning ${formatRate(br.burnRatePerHr)}%/hr — slides in ${formatHours(br.hoursUntilReset)}"
         } else if (br.burnRatePerHr != null && br.burnRatePerHr > 0) {
             "${formatRate(br.burnRatePerHr)}%/hr — resets in ${formatHours(br.hoursUntilReset)}"
         } else {
             "Resets in ${formatHours(br.hoursUntilReset)}"
         }
+        val infoText = br.limitingWindow?.let { "$it limit · ${rateText.replaceFirstChar(Char::lowercase)}" } ?: rateText
         Text(
             text = infoText,
             style = MaterialTheme.typography.labelSmall,

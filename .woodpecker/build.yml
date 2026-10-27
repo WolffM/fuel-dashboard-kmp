@@ -27,7 +27,7 @@ steps:
     commands:
       # libskiko.so (Compose Desktop UI tests) links libGL + libX11 — absent
       # from the base image, the native lib dies with ExceptionInInitializerError
-      - apt-get update -qq >/dev/null && apt-get install -y -qq libgl1 libx11-6 >/dev/null
+      - apt-get update -qq >/dev/null && apt-get install -y -qq libgl1 libx11-6 python3 >/dev/null
       - mkdir -p ~/.gradle
       # Leak-proof pattern (post-#287, fleet-shared/knowledge/step-log-secret-exposure.md):
       # Woodpecker's script-generator wrapper echoes expanded command text
@@ -81,8 +81,29 @@ steps:
       event: push
       branch: [main, master]
     commands:
-      - apk add --no-cache git bash curl
-      - set +x
-      - git fetch --tags "https://x-access-token:${GPR_TOKEN}@github.com/RhoMancer/fuel-dashboard-kmp.git" 2>&1 || true
-      - set -x
+      - apk add --no-cache git bash curl python3
+      # Leak-proof (post-#287): GPR_TOKEN consumed ONLY via os.environ — the
+      # old x-access-token:${GPR_TOKEN} URL form expanded the secret in
+      # command text, which the wrapper echoes to logs regardless of set +x.
+      # The token is OPTIONAL (graceful skip when absent/dead — same
+      # semantics as angus-tasks PR #84); fetch failures are non-fatal.
+      - |
+        cat > /tmp/fetch-tags.py << 'PYEOF'
+        import os, subprocess, sys
+        token = os.environ.get('GPR_TOKEN', '')
+        if not token:
+            print('GitHub tag fetch skipped (no token)')
+            sys.exit(0)
+        url = f'https://x-access-token:{token}@github.com/RhoMancer/fuel-dashboard-kmp.git'
+        r = subprocess.run(['git', 'fetch', '--tags', url], capture_output=True, text=True)
+        if r.returncode != 0:
+            scrubbed = r.stderr.replace(token, '***').strip()[:200]
+            print(f'GitHub tag fetch failed (non-fatal): {scrubbed}')
+        else:
+            print('GitHub tags fetched')
+        PYEOF
+        python3 /tmp/fetch-tags.py
       - REPO=RhoMancer/fuel-dashboard-kmp sh scripts/ci/auto-tag.sh
+    environment:
+      GPR_TOKEN:
+        from_secret: gpr_token

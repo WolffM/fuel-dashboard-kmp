@@ -5,6 +5,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
@@ -75,6 +76,8 @@ class ProviderContentUiTest {
         onSwapNow: (() -> Unit)? = null,
         onForceSwap: (() -> Unit)? = null,
         switchStatus: SwitchRunStatus? = null,
+        showHelp: Boolean = false,
+        combinedPlanGauge: Boolean = true,
         assertions: androidx.compose.ui.test.ComposeUiTest.() -> Unit,
     ) = runDesktopComposeUiTest {
         setContent {
@@ -84,7 +87,7 @@ class ProviderContentUiTest {
                         config = providerConfig,
                         report = report,
                         error = error,
-                        showHelp = false,
+                        showHelp = showHelp,
                         titleStyle = MaterialTheme.typography.titleSmall,
                         contentSpacing = 8.dp,
                         isChecking = false,
@@ -96,12 +99,59 @@ class ProviderContentUiTest {
                         onSwapNow = onSwapNow,
                         onForceSwap = onForceSwap,
                         switchStatus = switchStatus,
+                        combinedPlanGauge = combinedPlanGauge,
                     )
                 }
             }
         }
         assertions()
     }
+
+    private val claudeConfig = ProviderConfig(id = "c1", kind = ProviderKind.CLAUDE_CODE, displayName = "Claude — james")
+
+    private fun claudeReport() = ProviderReport(
+        providerId = "c1",
+        displayName = "Claude — james",
+        type = ProviderType.WINDOW_CREDIT,
+        remainingPct = 2,
+        resetsAt = 1_760_000_000_000L,
+        windowHours = 168.0,
+        windows = listOf(
+            ReportWindow("5-hour", 97, 1_760_000_000_000L, 5.0),
+            ReportWindow("Weekly", 2, 1_760_000_000_000L, 168.0),
+        ),
+        rawDisplay = "used 5h:3% weekly:98%",
+        limitingWindow = "Weekly",
+    )
+
+    @Test
+    fun claudePlan_leadsWithTheLimitingWindow() = render(claudeReport(), providerConfig = claudeConfig) {
+        // One headline, from the window that actually limits — not the
+        // 5-hour window's 97% beside a red weekly bar.
+        onAllNodesWithText("2% left").assertCountEquals(1)
+        onAllNodesWithText("97% left").assertCountEquals(0)
+        onNodeWithText("Weekly is the limit", substring = true).assertExists()
+        onNodeWithText("5-hour 97%", substring = true).assertExists("the other window stays visible as a marker")
+        onAllNodesWithText("used 5h:3% weekly:98%").assertCountEquals(0)
+    }
+
+    @Test
+    fun claudePlan_settingOffRestoresABarPerWindow() =
+        render(claudeReport(), providerConfig = claudeConfig, combinedPlanGauge = false) {
+            onNodeWithText("5-hour").assertExists()
+            onNodeWithText("Weekly").assertExists()
+            onAllNodesWithText("97% left").assertCountEquals(1)
+            onAllNodesWithText("2% left").assertCountEquals(1)
+            onAllNodesWithText("Weekly is the limit", substring = true).assertCountEquals(0)
+        }
+
+    @Test
+    fun claudePlan_linksAreHeaderIconsNotAListBelow() =
+        render(claudeReport(), providerConfig = claudeConfig, showHelp = true) {
+            onNodeWithContentDescription("Plan usage & limits").assertExists()
+            onNodeWithContentDescription("Manage subscription").assertExists()
+            onAllNodesWithText("Links", substring = true).assertCountEquals(0)
+        }
 
     @Test
     fun windowCredit_showsWindowNames() = render(windowCreditReport()) {

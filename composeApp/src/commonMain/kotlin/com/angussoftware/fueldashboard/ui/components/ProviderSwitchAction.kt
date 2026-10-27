@@ -14,7 +14,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
@@ -182,16 +181,19 @@ fun ClaudeLoginButton(
      * True when this account currently has no usable reading, which is what
      * an absent or expired token looks like from here.
      *
-     * Only changes the wording. The app cannot distinguish "no credentials"
-     * from "the endpoint is down" without asking, and a button that disappears
-     * whenever a provider is merely unwell would be missing exactly when it was
-     * needed.
+     * The button shows only then. The app cannot distinguish "no credentials"
+     * from "the endpoint is down" without asking, so it errs toward offering
+     * it whenever a reading is missing — but a healthy account has nothing to
+     * repair, and a "Re-log in" on every working card is clutter.
      */
     needsCredentials: Boolean,
     onLogIn: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     if (onLogIn == null) return
+    // A launch in flight still shows its progress below, even once the
+    // reading it was meant to repair has come back.
+    if (!needsCredentials && !isLoggingIn) return
 
     if (isLoggingIn) {
         Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
@@ -203,27 +205,14 @@ fun ClaudeLoginButton(
     }
 
     // Same metrics and the same interactive-minimum opt-out as the swap
-    // button, so the two read as one control set rather than two strays. Tonal
-    // for the repair case and a plain text button otherwise: when the account
-    // is healthy this is a rarely-wanted action and should not compete with the
-    // gauge beside it.
+    // button, so the two read as one control set rather than two strays.
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-        if (needsCredentials) {
-            FilledTonalButton(
-                onClick = onLogIn,
-                modifier = modifier.heightIn(min = 28.dp),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-            ) {
-                Text("Log in", style = MaterialTheme.typography.labelSmall)
-            }
-        } else {
-            TextButton(
-                onClick = onLogIn,
-                modifier = modifier.heightIn(min = 28.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            ) {
-                Text("Re-log in", style = MaterialTheme.typography.labelSmall)
-            }
+        FilledTonalButton(
+            onClick = onLogIn,
+            modifier = modifier.heightIn(min = 28.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+        ) {
+            Text("Log in", style = MaterialTheme.typography.labelSmall)
         }
     }
 }
