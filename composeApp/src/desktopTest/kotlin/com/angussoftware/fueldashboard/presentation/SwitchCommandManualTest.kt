@@ -215,23 +215,16 @@ class SwitchCommandManualTest {
     // --- overriding the fleet gate ------------------------------------------
 
     @Test
-    fun aRefusalIsMarkedOverridableSoTheWayPastItCanBeOffered() {
-        val vm = viewModel(ClaudeCodeFleet(busy = 1, idle = 22))
+    fun anUnforcedSwapRunsTheCommandAsConfigured() {
+        // --force is the Force button's alone: an ordinary swap must leave the
+        // script's own busy check in place.
+        val ran = mutableListOf<String>()
+        val vm = viewModel(ClaudeCodeFleet(busy = 0, idle = 23), ran = ran)
 
         vm.runSwitchCommandNow("zai-1")
-        val status = vm.awaitStatus()
+        vm.awaitStatus()
 
-        assertFalse(status.ok)
-        assertTrue(status.overridable, "a fleet refusal is the one thing an operator may override")
-    }
-
-    @Test
-    fun aSuccessIsNotOverridable() {
-        val vm = viewModel(ClaudeCodeFleet(busy = 0, idle = 23))
-
-        vm.runSwitchCommandNow("zai-1")
-
-        assertFalse(vm.awaitStatus().overridable, "nothing to override when it worked")
+        assertEquals(listOf("/bin/echo swapped"), ran)
     }
 
     @Test
@@ -243,7 +236,9 @@ class SwitchCommandManualTest {
         val status = vm.awaitStatus()
 
         assertTrue(status.ok, status.message)
-        assertEquals(listOf("/bin/echo swapped"), ran)
+        // --force passed on, so a script with its own busy check
+        // (claude-account switch) does not refuse what the operator forced.
+        assertEquals(listOf("/bin/echo swapped --force"), ran)
     }
 
     @Test
@@ -256,7 +251,7 @@ class SwitchCommandManualTest {
         vm.runSwitchCommandNow("zai-1", force = true)
 
         assertTrue(vm.awaitStatus().ok)
-        assertEquals(listOf("/bin/echo swapped"), ran)
+        assertEquals(listOf("/bin/echo swapped --force"), ran)
     }
 
     @Test

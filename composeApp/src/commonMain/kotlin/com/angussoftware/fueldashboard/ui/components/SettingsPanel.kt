@@ -1315,13 +1315,15 @@ internal fun ProviderConfigRow(
                                         "How to make this provider the active one — most tools " +
                                             "take the target as an argument, e.g. " +
                                             "\"my-switch backup\". Setting it does two things: it " +
-                                            "adds a Swap button to this provider's card, and it " +
-                                            "makes this provider eligible as an automatic " +
+                                            "adds Swap and Force buttons to this provider's card, " +
+                                            "and it makes this provider eligible as an automatic " +
                                             "destination when another one runs low.\n\n" +
-                                            "Either way the command only runs while every Claude " +
-                                            "Code session is idle, since switching restarts them. " +
-                                            "No shell: no pipes or redirects. Every run is " +
-                                            "recorded in the decision log.",
+                                            "Swap and the automatic trigger only run it while every " +
+                                            "Claude Code session is idle, since switching restarts " +
+                                            "them. Force runs it anyway, with --force appended so a " +
+                                            "script with its own busy check (claude-account switch " +
+                                            "<name>) skips that too. No shell: no pipes or " +
+                                            "redirects. Every run is recorded in the decision log.",
                                     )
                                 }
                             }

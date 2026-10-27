@@ -79,6 +79,10 @@ data class ProviderConfig(
      * the state of the machine, so it is never enabled by default, never
      * inferred, and the outcome of every run is recorded in the decision log.
      *
+     * The card's Force button runs it past the fleet gate with `--force`
+     * appended, so a script that keeps its own busy check
+     * (`claude-account switch <name>`) can be told to skip that as well.
+     *
      * Split on whitespace and executed directly, with no shell, so
      * `my-script --provider backup` works while pipes, redirects and globs do
      * not. Point it at a script if you need those. Desktop only.

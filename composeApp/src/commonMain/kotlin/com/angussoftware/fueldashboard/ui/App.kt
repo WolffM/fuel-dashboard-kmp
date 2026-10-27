@@ -650,10 +650,8 @@ internal fun FuelColumnContent(
                             } else {
                                 null
                             },
-                            // Only wired when the last attempt was refused by
-                            // the fleet gate, so the override cannot be
-                            // reached without having first been told why.
-                            onSwapAnyway = if (state.switchResults[config.id]?.overridable == true) {
+                            // Offered wherever Swap is: same opt-in, same command.
+                            onForceSwap = if (switchCommandsSupported && config.activateCommand.isNotBlank()) {
                                 { viewModel.runSwitchCommandNow(config.id, force = true) }
                             } else {
                                 null
@@ -732,7 +730,7 @@ private fun ProviderSection(
     isSettling: Boolean,
     isSwapping: Boolean,
     onSwapNow: (() -> Unit)?,
-    onSwapAnyway: (() -> Unit)?,
+    onForceSwap: (() -> Unit)?,
     rateLimitedUntil: Long?,
     switchStatus: com.angussoftware.fueldashboard.presentation.SwitchRunStatus?,
     isLoggingIn: Boolean = false,
@@ -753,7 +751,7 @@ private fun ProviderSection(
         isSettling = isSettling,
         isSwapping = isSwapping,
         onSwapNow = onSwapNow,
-        onSwapAnyway = onSwapAnyway,
+        onForceSwap = onForceSwap,
         rateLimitedUntil = rateLimitedUntil,
         switchStatus = switchStatus,
         isLoggingIn = isLoggingIn,

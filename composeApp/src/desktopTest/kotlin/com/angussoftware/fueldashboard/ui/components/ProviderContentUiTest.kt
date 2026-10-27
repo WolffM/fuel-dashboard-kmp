@@ -16,6 +16,8 @@ import com.angussoftware.fueldashboard.model.ReportWindow
 import com.angussoftware.fueldashboard.presentation.SwitchRunStatus
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.performClick
+import kotlin.test.assertEquals
 import kotlin.test.Test
 
 /**
@@ -71,6 +73,7 @@ class ProviderContentUiTest {
         isSwapping: Boolean = false,
         isServingClaudeCode: Boolean = false,
         onSwapNow: (() -> Unit)? = null,
+        onForceSwap: (() -> Unit)? = null,
         switchStatus: SwitchRunStatus? = null,
         assertions: androidx.compose.ui.test.ComposeUiTest.() -> Unit,
     ) = runDesktopComposeUiTest {
@@ -91,6 +94,7 @@ class ProviderContentUiTest {
                         isSettling = isSettling,
                         isSwapping = isSwapping,
                         onSwapNow = onSwapNow,
+                        onForceSwap = onForceSwap,
                         switchStatus = switchStatus,
                     )
                 }
@@ -224,6 +228,53 @@ class ProviderContentUiTest {
     ) {
         onAllNodesWithText("Swap").assertCountEquals(0)
         onNodeWithText("Swapping\u2026").assertIsDisplayed()
+    }
+
+    @Test
+    fun forceButton_showsBesideSwapAndRuns() {
+        var forced = 0
+        render(
+            windowCreditReport(),
+            providerConfig = swapConfig,
+            onSwapNow = {},
+            onForceSwap = { forced++ },
+        ) {
+            // Offered up front, not only after a refusal.
+            onNodeWithText("Swap").assertIsDisplayed()
+            onNodeWithText("Force").assertIsDisplayed().performClick()
+            assertEquals(1, forced)
+        }
+    }
+
+    @Test
+    fun forceButton_hiddenWhenNoCommandConfigured() = render(
+        windowCreditReport(),
+        onSwapNow = {},
+        onForceSwap = {},
+    ) {
+        onAllNodesWithText("Force").assertCountEquals(0)
+    }
+
+    @Test
+    fun forceButton_disabledOnTheProviderAlreadyInUse() = render(
+        windowCreditReport(),
+        providerConfig = swapConfig,
+        isServingClaudeCode = true,
+        onSwapNow = {},
+        onForceSwap = {},
+    ) {
+        onNodeWithText("Force").assertIsNotEnabled()
+    }
+
+    @Test
+    fun forceButton_hiddenWhileSwapping() = render(
+        windowCreditReport(),
+        providerConfig = swapConfig,
+        isSwapping = true,
+        onSwapNow = {},
+        onForceSwap = {},
+    ) {
+        onAllNodesWithText("Force").assertCountEquals(0)
     }
 
     @Test

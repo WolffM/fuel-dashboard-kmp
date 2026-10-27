@@ -66,8 +66,8 @@ fun ProviderContent(
     onSwapNow: (() -> Unit)? = null,
     /** Outcome of the last manual swap, or null when there has not been one. */
     switchStatus: SwitchRunStatus? = null,
-    /** Retries the swap past a fleet-gate refusal. Null when not offered. */
-    onSwapAnyway: (() -> Unit)? = null,
+    /** Swaps even while sessions are working. Null when not offered. */
+    onForceSwap: (() -> Unit)? = null,
     /** True while this account's login terminal is being opened. */
     isLoggingIn: Boolean = false,
     /** Non-null only for a plan provider on a platform that can open a login. */
@@ -115,6 +115,7 @@ fun ProviderContent(
                 isSwapping = isSwapping,
                 isActive = isServingClaudeCode,
                 onSwapNow = onSwapNow,
+                onForceSwap = onForceSwap,
                 )
                 // The step the app cannot take for you. Beside the swap button
                 // because both are actions on this one provider, and a login is
@@ -250,7 +251,7 @@ fun ProviderContent(
         // only its result belongs down here with the card's other detail.
         if (switchStatus != null) {
             Spacer(Modifier.height(6.dp))
-            ProviderSwapStatus(switchStatus, onOverride = onSwapAnyway)
+            ProviderSwapStatus(switchStatus)
         }
 
         // Gemini: Google exposes no quota/usage API for API keys — limits,

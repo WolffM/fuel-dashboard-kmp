@@ -1,6 +1,6 @@
 package com.angussoftware.fueldashboard.ui.components
 
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,6 +44,12 @@ import androidx.compose.ui.unit.dp
  * is the fleet gate in the view model, which refuses while any agent session
  * is mid-turn; a dialog would only add a click to an action that is already
  * blocked when it would be dangerous.
+ *
+ * "Force" beside it is the way past that gate, offered up front rather than
+ * only after a refusal: the operator is often the one who knows the gate is
+ * wrong — the "busy" session is the very one asking for the swap — and making
+ * them be refused first only adds a round trip to a swap they already decided
+ * on. It is styled as an error so it never reads as the ordinary path.
  */
 @Composable
 fun ProviderSwapButton(
@@ -60,6 +66,8 @@ fun ProviderSwapButton(
     isSwapping: Boolean,
     isActive: Boolean,
     onSwapNow: (() -> Unit)?,
+    /** Swaps even while sessions are working. Null when not offered. */
+    onForceSwap: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (onSwapNow == null || !hasActivateCommand) return
@@ -88,62 +96,29 @@ fun ProviderSwapButton(
     // specifies the spacing you see. Safe here: this is a desktop-only control
     // driven by a mouse, and 28dp tall is a comfortable target for one.
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-    FilledTonalButton(
-        onClick = onSwapNow,
-        enabled = !isActive,
-        modifier = modifier.heightIn(min = 28.dp),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Just "Swap". The card's own "● IN USE" badge sits inches away and
-        // already says why this is disabled, so a second label repeating it
-        // only crowds the row.
-        Text("Swap", style = MaterialTheme.typography.labelSmall)
-    }
-    }
-}
-
-/**
- * Outcome of the last swap attempt on this provider, and the way past a
- * refusal.
- *
- * A refusal is the case that most needs saying: without it, "the fleet is
- * busy" and "the button is broken" look identical from the outside. When the
- * refusal came from the fleet gate it also carries an override, because the
- * operator can know something the gate cannot — most often that the session
- * reported busy is the very one being used to ask for the swap, in which case
- * waiting for idle waits forever.
- *
- * The override lives here rather than on the button on purpose. Reaching it
- * requires having tried, been told which sessions are working, and then
- * choosing to interrupt them — a sequence, not a shortcut. A pre-emptive
- * confirmation dialog would have the opposite effect: a click to dismiss
- * before anyone knows whether there was anything to weigh.
- */
-@Composable
-fun ProviderSwapStatus(
-    status: com.angussoftware.fueldashboard.presentation.SwitchRunStatus?,
-    onOverride: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
-) {
-    if (status == null) return
-    Column(modifier = modifier) {
-        Text(
-            text = (if (status.ok) "✓ " else "⚠ ") + status.message,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (status.ok) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                MaterialTheme.colorScheme.error
-            },
-        )
-        if (status.overridable && onOverride != null) {
-            Spacer(Modifier.height(2.dp))
-            // Same shape and metrics as the Swap button it stands in for, so
-            // the pair reads as one control set rather than a button and a
-            // link. Error colours rather than the default tonal ones: it does
-            // the same thing, but over the top of a refusal.
+        FilledTonalButton(
+            onClick = onSwapNow,
+            enabled = !isActive,
+            modifier = Modifier.heightIn(min = 28.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+        ) {
+            // Just "Swap". The card's own "● IN USE" badge sits inches away and
+            // already says why this is disabled, so a second label repeating it
+            // only crowds the row.
+            Text("Swap", style = MaterialTheme.typography.labelSmall)
+        }
+        if (onForceSwap != null) {
+            // Same shape and metrics as Swap, so the pair reads as one control
+            // set. Error colours: it does the same thing, but over the top of
+            // any session still working.
             FilledTonalButton(
-                onClick = onOverride,
+                onClick = onForceSwap,
+                enabled = !isActive,
                 modifier = Modifier.heightIn(min = 28.dp),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
                 colors = ButtonDefaults.filledTonalButtonColors(
@@ -151,10 +126,35 @@ fun ProviderSwapStatus(
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 ),
             ) {
-                Text("Force swap", style = MaterialTheme.typography.labelSmall)
+                Text("Force", style = MaterialTheme.typography.labelSmall)
             }
         }
     }
+    }
+}
+
+/**
+ * Outcome of the last swap attempt on this provider.
+ *
+ * A refusal is the case that most needs saying: without it, "the fleet is
+ * busy" and "the button is broken" look identical from the outside.
+ */
+@Composable
+fun ProviderSwapStatus(
+    status: com.angussoftware.fueldashboard.presentation.SwitchRunStatus?,
+    modifier: Modifier = Modifier,
+) {
+    if (status == null) return
+    Text(
+        text = (if (status.ok) "✓ " else "⚠ ") + status.message,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (status.ok) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            MaterialTheme.colorScheme.error
+        },
+        modifier = modifier,
+    )
 }
 
 /**

@@ -265,16 +265,6 @@ data class ProviderBurnRateDisplay(
 data class SwitchRunStatus(
     val ok: Boolean,
     val message: String,
-    /**
-     * True when this was the fleet gate refusing, and only then.
-     *
-     * The operator may legitimately know something the gate cannot: most
-     * often that the "busy" session is the very one being used to ask for the
-     * swap, in which case waiting for idle waits forever. Surfacing an
-     * override only after a refusal keeps it a deliberate second step rather
-     * than a checkbox someone silences once and forgets.
-     */
-    val overridable: Boolean = false,
 )
 
 data class DashboardState(
@@ -790,11 +780,14 @@ class FuelViewModel(
     fun runSwitchCommandNow(
         providerId: String,
         /**
-         * Proceed even though sessions are still working.
+         * Proceed even though sessions are still working, by skipping the
+         * fleet gate and passing `--force` to the command (see
+         * [executeSwitchCommand]).
          *
-         * Reachable only from the refusal the operator has already seen, so
-         * this cannot be the first thing a click does. The automatic trigger
-         * never passes it.
+         * Only the card's Force button passes it. The operator may know
+         * something the gate cannot — most often that the "busy" session is
+         * the very one being used to ask for the swap, in which case waiting
+         * for idle waits forever. The automatic trigger never passes it.
          */
         force: Boolean = false,
     ) {
@@ -827,11 +820,7 @@ class FuelViewModel(
                             remaining ?: 0,
                             "manual swap refused — fleet ${run.fleet?.describe() ?: "unreadable"}",
                         )
-                        SwitchRunStatus(
-                            ok = false,
-                            message = refusalMessage(run.fleet),
-                            overridable = true,
-                        )
+                        SwitchRunStatus(ok = false, message = refusalMessage(run.fleet))
                     }
                     is SwitchRun.Ran -> {
                         switchTriggerState[providerId] =
@@ -2183,9 +2172,15 @@ class FuelViewModel(
         remainingPct: Int?,
         reason: String,
         /**
-         * Skip the fleet gate. Only ever true for a manual swap the operator
-         * has already been refused once — the automatic trigger never sets
-         * it, because nobody is there to accept the consequence.
+         * Skip the fleet gate and append `--force` to the command. Only ever
+         * true for a manual swap from the card's Force button — the automatic
+         * trigger never sets it, because nobody is there to accept the
+         * consequence.
+         *
+         * The flag is passed on because a switch script may keep a busy check
+         * of its own (`claude-account switch` does, and refuses a busy fleet
+         * without `--force`), so skipping only this gate would still be
+         * refused one step later.
          */
         force: Boolean = false,
     ): SwitchRun {
@@ -2199,10 +2194,11 @@ class FuelViewModel(
         // config is the provider being switched TO, so its activateCommand is
         // the one to run — for the manual button that is the card you clicked,
         // for the automatic trigger it is the target chosen by swapTargetFrom.
-        val result = switchRunner(config.activateCommand)
+        val command = if (force) "${config.activateCommand} --force" else config.activateCommand
+        val result = switchRunner(command)
         onDecisionLogged?.invoke(
             "switch-command",
-            config.activateCommand.take(120),
+            command.take(120),
             config.id,
             "action",
             if (result.succeeded) "ok" else "failed",
@@ -2313,7 +2309,7 @@ class FuelViewModel(
     private fun refusalMessage(fleet: ClaudeCodeFleet?): String = when {
         fleet == null -> "Not swapped — could not read the Claude Code session registry."
         fleet.total == 0 -> "Not swapped — no Claude Code sessions are registered."
-        fleet.busy > 0 -> "Not swapped — ${fleet.busy} of ${fleet.total} sessions still working. Let them finish."
+        fleet.busy > 0 -> "Not swapped — ${fleet.busy} of ${fleet.total} sessions still working. Let them finish, or Force."
         else -> "Not swapped — ${fleet.unknown} session(s) in an unknown state."
     }
 }
